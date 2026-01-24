@@ -1,0 +1,28 @@
+# FastAPI
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+python-multipart==0.0.9
+
+# Database
+sqlalchemy==2.0.25
+psycopg2-binary==2.9.9
+pgvector==0.2.5
+alembic==1.13.1
+
+# OCR
+paddleocr==2.7.0.3
+paddlepaddle==2.6.0
+pdf2image==1.17.0
+Pillow==10.2.0
+
+# ML/Embeddings
+sentence-transformers==2.3.1
+numpy==1.26.4
+
+# LLM
+anthropic==0.18.1
+
+# Utilities
+python-dotenv==1.0.1
+pydantic==2.6.1
+pydantic-settings==2.1.0
