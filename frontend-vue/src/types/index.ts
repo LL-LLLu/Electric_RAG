@@ -2,6 +2,97 @@
 // These types match the backend FastAPI schemas exactly
 
 // ============================================
+// Project Types
+// ============================================
+
+export interface Project {
+  id: number
+  name: string
+  description: string | null
+  system_type: string | null
+  facility_name: string | null
+  status: string
+  cover_image_path: string | null
+  notes: string | null
+  tags: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface ProjectStats {
+  document_count: number
+  equipment_count: number
+  conversation_count: number
+  page_count: number
+}
+
+export interface ProjectDetail extends Project {
+  stats: ProjectStats
+}
+
+export interface ProjectCreate {
+  name: string
+  description?: string | null
+  system_type?: string | null
+  facility_name?: string | null
+  status?: string
+  notes?: string | null
+  tags?: string[]
+}
+
+export interface ProjectUpdate {
+  name?: string
+  description?: string | null
+  system_type?: string | null
+  facility_name?: string | null
+  status?: string
+  notes?: string | null
+  tags?: string[]
+}
+
+// ============================================
+// Conversation Types
+// ============================================
+
+export interface Conversation {
+  id: number
+  project_id: number
+  title: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface SourceReference {
+  document_id: number
+  document_name: string
+  page_number: number
+  snippet: string | null
+  bbox: { x_min: number; y_min: number; x_max: number; y_max: number } | null
+  equipment_tag: string | null
+}
+
+export interface Message {
+  id: number
+  conversation_id: number
+  role: 'user' | 'assistant'
+  content: string
+  sources: SourceReference[] | null
+  created_at: string
+}
+
+export interface ConversationDetail extends Conversation {
+  messages: Message[]
+}
+
+export interface ConversationCreate {
+  title?: string | null
+}
+
+export interface MessageCreate {
+  content: string
+}
+
+// ============================================
 // Document Types
 // ============================================
 
