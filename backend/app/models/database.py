@@ -6,11 +6,32 @@ from pgvector.sqlalchemy import Vector
 Base = declarative_base()
 
 
+class Project(Base):
+    """Represents a project containing documents"""
+    __tablename__ = "projects"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text)
+    system_type = Column(String(100))  # electrical, mechanical, HVAC
+    facility_name = Column(String(255))
+    status = Column(String(50), default="active")  # active, archived, completed
+    cover_image_path = Column(String(500))
+    notes = Column(Text)
+    tags = Column(Text)  # JSON array stored as text
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    documents = relationship("Document", back_populates="project", cascade="all, delete-orphan")
+    equipment = relationship("Equipment", back_populates="project")
+
+
 class Document(Base):
     """Represents an electrical drawing document (PDF)"""
     __tablename__ = "documents"
 
     id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"))
     filename = Column(String(255), nullable=False)
     original_filename = Column(String(255), nullable=False)
     title = Column(String(500))
@@ -21,11 +42,14 @@ class Document(Base):
     file_path = Column(String(500), nullable=False)
     file_size = Column(Integer)
     page_count = Column(Integer)
+    pages_processed = Column(Integer, default=0)  # Track processing progress
     upload_date = Column(DateTime, default=datetime.utcnow)
     processed = Column(Integer, default=0)  # 0=pending, 1=processing, 2=done, -1=error
+    processing_error = Column(Text)  # Store error message if failed
 
     pages = relationship("Page", back_populates="document", cascade="all, delete-orphan")
     equipment = relationship("Equipment", back_populates="document")
+    project = relationship("Project", back_populates="documents")
 
 
 class Page(Base):
@@ -37,6 +61,8 @@ class Page(Base):
     page_number = Column(Integer, nullable=False)
     ocr_text = Column(Text)
     processed_text = Column(Text)
+    ai_analysis = Column(Text)  # AI-generated analysis of page content
+    ai_equipment_list = Column(Text)  # JSON list of equipment identified by AI
     image_path = Column(String(500))
     embedding = Column(Vector(384))
 
@@ -53,7 +79,8 @@ class Equipment(Base):
     __tablename__ = "equipment"
 
     id = Column(Integer, primary_key=True, index=True)
-    tag = Column(String(100), unique=True, nullable=False, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"))
+    tag = Column(String(100), nullable=False, index=True)
     equipment_type = Column(String(100), index=True)
     description = Column(Text)
     manufacturer = Column(String(200))
@@ -64,6 +91,7 @@ class Equipment(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     document = relationship("Document", back_populates="equipment")
+    project = relationship("Project", back_populates="equipment")
     locations = relationship("EquipmentLocation", back_populates="equipment")
     controls = relationship(
         "EquipmentRelationship",
@@ -74,6 +102,10 @@ class Equipment(Base):
         "EquipmentRelationship",
         foreign_keys="EquipmentRelationship.target_id",
         back_populates="target"
+    )
+
+    __table_args__ = (
+        Index('idx_equipment_project_tag', 'project_id', 'tag', unique=True),
     )
 
 
