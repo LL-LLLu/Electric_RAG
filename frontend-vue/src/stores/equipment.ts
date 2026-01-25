@@ -1,27 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-
-export interface Equipment {
-  id: string
-  tag: string
-  name: string
-  type: string
-  document_id: string
-  page_number: number
-  description?: string
-}
-
-export interface EquipmentDetail extends Equipment {
-  locations: EquipmentLocation[]
-  controls: string[]
-  controlled_by: string[]
-}
-
-export interface EquipmentLocation {
-  document_id: string
-  document_name: string
-  page_number: number
-}
+import type { Equipment } from '@/types'
 
 export const useEquipmentStore = defineStore('equipment', () => {
   // Equipment list
@@ -47,14 +26,14 @@ export const useEquipmentStore = defineStore('equipment', () => {
       const query = searchQuery.value.toLowerCase()
       result = result.filter(e =>
         e.tag.toLowerCase().includes(query) ||
-        e.name.toLowerCase().includes(query) ||
+        e.equipment_type.toLowerCase().includes(query) ||
         (e.description && e.description.toLowerCase().includes(query))
       )
     }
 
     // Filter by type
     if (typeFilters.value.length > 0) {
-      result = result.filter(e => typeFilters.value.includes(e.type))
+      result = result.filter(e => typeFilters.value.includes(e.equipment_type))
     }
 
     return result

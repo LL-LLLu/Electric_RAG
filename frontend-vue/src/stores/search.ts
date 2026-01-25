@@ -1,22 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-
-export interface SearchResult {
-  id: string
-  document_id: string
-  document_name: string
-  page_number: number
-  content: string
-  score: number
-  equipment_tags?: string[]
-}
-
-export interface RAGAnswer {
-  answer: string
-  sources: SearchResult[]
-}
-
-export type SearchMode = 'search' | 'ai'
+import type { SearchResult, RAGResponse, SearchMode } from '@/types'
 
 export const useSearchStore = defineStore('search', () => {
   // Search state
@@ -25,8 +9,13 @@ export const useSearchStore = defineStore('search', () => {
   const mode = ref<SearchMode>('search')
   const loading = ref(false)
 
+  // Response metadata
+  const queryType = ref<string>('')
+  const totalCount = ref(0)
+  const responseTimeMs = ref(0)
+
   // RAG answer (for AI mode)
-  const ragAnswer = ref<RAGAnswer | null>(null)
+  const ragAnswer = ref<RAGResponse | null>(null)
 
   // Search history
   const recentQueries = ref<string[]>([])
@@ -58,13 +47,28 @@ export const useSearchStore = defineStore('search', () => {
     loading.value = value
   }
 
-  function setRAGAnswer(answer: RAGAnswer | null) {
+  function setQueryType(type: string) {
+    queryType.value = type
+  }
+
+  function setTotalCount(count: number) {
+    totalCount.value = count
+  }
+
+  function setResponseTimeMs(ms: number) {
+    responseTimeMs.value = ms
+  }
+
+  function setRAGAnswer(answer: RAGResponse | null) {
     ragAnswer.value = answer
   }
 
   function clearResults() {
     results.value = []
     ragAnswer.value = null
+    queryType.value = ''
+    totalCount.value = 0
+    responseTimeMs.value = 0
   }
 
   function addToHistory(q: string) {
@@ -90,6 +94,9 @@ export const useSearchStore = defineStore('search', () => {
     results.value = []
     ragAnswer.value = null
     loading.value = false
+    queryType.value = ''
+    totalCount.value = 0
+    responseTimeMs.value = 0
   }
 
   return {
@@ -97,6 +104,9 @@ export const useSearchStore = defineStore('search', () => {
     results,
     mode,
     loading,
+    queryType,
+    totalCount,
+    responseTimeMs,
     ragAnswer,
     recentQueries,
     hasResults,
@@ -108,6 +118,9 @@ export const useSearchStore = defineStore('search', () => {
     setMode,
     toggleMode,
     setLoading,
+    setQueryType,
+    setTotalCount,
+    setResponseTimeMs,
     setRAGAnswer,
     clearResults,
     addToHistory,

@@ -1,20 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, reactive, computed } from 'vue'
-
-export interface Document {
-  id: string
-  filename: string
-  upload_date: string
-  page_count: number
-  equipment_count?: number
-}
-
-export interface UploadProgress {
-  filename: string
-  progress: number
-  status: 'pending' | 'uploading' | 'processing' | 'completed' | 'error'
-  error?: string
-}
+import type { Document, UploadProgress } from '@/types'
 
 export const useDocumentsStore = defineStore('documents', () => {
   // Document list
@@ -41,7 +27,14 @@ export const useDocumentsStore = defineStore('documents', () => {
     totalCount.value++
   }
 
-  function removeDocument(id: string) {
+  function updateDocument(doc: Document) {
+    const index = documents.value.findIndex(d => d.id === doc.id)
+    if (index !== -1) {
+      documents.value[index] = doc
+    }
+  }
+
+  function removeDocument(id: number) {
     const index = documents.value.findIndex(d => d.id === id)
     if (index !== -1) {
       documents.value.splice(index, 1)
@@ -107,6 +100,7 @@ export const useDocumentsStore = defineStore('documents', () => {
     activeUploads,
     setDocuments,
     addDocument,
+    updateDocument,
     removeDocument,
     setTotalCount,
     setLoading,

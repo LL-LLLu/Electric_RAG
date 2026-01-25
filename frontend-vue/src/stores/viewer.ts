@@ -1,16 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, reactive, computed } from 'vue'
-
-export interface ViewerDocument {
-  id: string
-  filename: string
-  page_count: number
-}
-
-export interface PanPosition {
-  x: number
-  y: number
-}
+import type { ViewerDocument, PanPosition } from '@/types'
 
 export const useViewerStore = defineStore('viewer', () => {
   // Current document
