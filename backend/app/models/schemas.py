@@ -33,6 +33,52 @@ class QueryType(str, Enum):
     GENERAL = "general"
 
 
+# Project Schemas
+class ProjectBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    system_type: Optional[str] = None
+    facility_name: Optional[str] = None
+    status: str = "active"
+    notes: Optional[str] = None
+    tags: Optional[List[str]] = []
+
+
+class ProjectCreate(ProjectBase):
+    pass
+
+
+class ProjectUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = None
+    system_type: Optional[str] = None
+    facility_name: Optional[str] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+class ProjectResponse(ProjectBase):
+    id: int
+    cover_image_path: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ProjectStats(BaseModel):
+    document_count: int = 0
+    equipment_count: int = 0
+    conversation_count: int = 0
+    page_count: int = 0
+
+
+class ProjectDetail(ProjectResponse):
+    stats: ProjectStats
+
+
 # Document Schemas
 class DocumentBase(BaseModel):
     title: Optional[str] = None
@@ -52,8 +98,10 @@ class DocumentResponse(DocumentBase):
     original_filename: str
     file_size: Optional[int]
     page_count: Optional[int]
+    pages_processed: Optional[int] = 0
     upload_date: datetime
     processed: int
+    processing_error: Optional[str] = None
 
     class Config:
         from_attributes = True
