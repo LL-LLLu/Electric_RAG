@@ -79,6 +79,55 @@ class ProjectDetail(ProjectResponse):
     stats: ProjectStats
 
 
+# Conversation Schemas
+class ConversationCreate(BaseModel):
+    title: Optional[str] = None
+
+
+class ConversationUpdate(BaseModel):
+    title: Optional[str] = None
+
+
+class ConversationResponse(BaseModel):
+    id: int
+    project_id: int
+    title: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SourceReference(BaseModel):
+    document_id: int
+    document_name: str
+    page_number: int
+    snippet: Optional[str] = None
+    bbox: Optional[dict] = None
+    equipment_tag: Optional[str] = None
+
+
+class MessageCreate(BaseModel):
+    content: str = Field(..., min_length=1, max_length=5000)
+
+
+class MessageResponse(BaseModel):
+    id: int
+    conversation_id: int
+    role: str
+    content: str
+    sources: Optional[List[SourceReference]] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ConversationDetail(ConversationResponse):
+    messages: List[MessageResponse] = []
+
+
 # Document Schemas
 class DocumentBase(BaseModel):
     title: Optional[str] = None
