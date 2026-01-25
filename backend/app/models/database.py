@@ -24,6 +24,43 @@ class Project(Base):
 
     documents = relationship("Document", back_populates="project", cascade="all, delete-orphan")
     equipment = relationship("Equipment", back_populates="project")
+    conversations = relationship("Conversation", back_populates="project", cascade="all, delete-orphan")
+
+
+class Conversation(Base):
+    """Represents a chat conversation within a project"""
+    __tablename__ = "conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String(255))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    project = relationship("Project", back_populates="conversations")
+    messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index('idx_conversation_project', 'project_id'),
+    )
+
+
+class Message(Base):
+    """Represents a message in a conversation"""
+    __tablename__ = "messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False)
+    role = Column(String(20), nullable=False)  # 'user' or 'assistant'
+    content = Column(Text, nullable=False)
+    sources = Column(Text)  # JSON array of source references
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    conversation = relationship("Conversation", back_populates="messages")
+
+    __table_args__ = (
+        Index('idx_message_conversation', 'conversation_id'),
+    )
 
 
 class Document(Base):
