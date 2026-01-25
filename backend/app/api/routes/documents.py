@@ -1,10 +1,12 @@
 import os
 import shutil
 import uuid
+import io
 from typing import List
-from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, BackgroundTasks, Query
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
+from PIL import Image
 
 from app.db.session import get_db, SessionLocal
 from app.models.database import Document, Page, Equipment, Project
@@ -261,6 +263,35 @@ async def get_page_image(document_id: int, page_number: int, db: Session = Depen
         raise HTTPException(status_code=404, detail="Page image not found")
 
     return FileResponse(image_path, media_type="image/png")
+
+
+@router.get("/{document_id}/page/{page_number}/thumbnail")
+async def get_page_thumbnail(
+    document_id: int,
+    page_number: int,
+    width: int = Query(default=200, ge=50, le=400),
+    db: Session = Depends(get_db)
+):
+    """Get a thumbnail of a page for preview cards"""
+    image_path = os.path.join(settings.upload_dir, f"doc_{document_id}", "pages", f"page_{page_number}.png")
+
+    if not os.path.exists(image_path):
+        raise HTTPException(status_code=404, detail="Page image not found")
+
+    # Create thumbnail
+    with Image.open(image_path) as img:
+        # Calculate height maintaining aspect ratio
+        aspect_ratio = img.height / img.width
+        height = int(width * aspect_ratio)
+
+        img.thumbnail((width, height), Image.Resampling.LANCZOS)
+
+        # Save to bytes
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format='PNG', optimize=True)
+        img_bytes.seek(0)
+
+    return StreamingResponse(img_bytes, media_type="image/png")
 
 
 @router.get("/{document_id}/pdf")
