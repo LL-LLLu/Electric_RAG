@@ -125,7 +125,7 @@ class MessageResponse(BaseModel):
 
 
 class ConversationDetail(ConversationResponse):
-    messages: List[MessageResponse] = []
+    messages: List[MessageResponse] = Field(default_factory=list)
 
 
 # Document Schemas
