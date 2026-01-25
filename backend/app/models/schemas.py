@@ -41,7 +41,7 @@ class ProjectBase(BaseModel):
     facility_name: Optional[str] = None
     status: str = "active"
     notes: Optional[str] = None
-    tags: Optional[List[str]] = []
+    tags: Optional[List[str]] = Field(default_factory=list)
 
 
 class ProjectCreate(ProjectBase):
