@@ -1,4 +1,4 @@
-from app.models.database import Base, Document, Page, Equipment, EquipmentLocation, EquipmentRelationship, Wire, SearchLog
+from app.models.database import Base, Project, Document, Page, Equipment, EquipmentLocation, EquipmentRelationship, Wire, SearchLog
 from app.models.schemas import (
     EquipmentType, RelationshipType, QueryType,
     DocumentBase, DocumentCreate, DocumentResponse, PageSummary, DocumentDetail,
