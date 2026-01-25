@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import documents, search, equipment, health
+from app.api.routes import documents, search, equipment, health, projects
 from app.db.session import init_db
 from app.config import settings
 
@@ -42,6 +42,7 @@ app.add_middleware(
 )
 
 app.include_router(health.router, tags=["Health"])
+app.include_router(projects.router, prefix="/api/projects", tags=["Projects"])
 app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
 app.include_router(search.router, prefix="/api/search", tags=["Search"])
 app.include_router(equipment.router, prefix="/api/equipment", tags=["Equipment"])
