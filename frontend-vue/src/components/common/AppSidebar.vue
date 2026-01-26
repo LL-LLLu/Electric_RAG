@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { RouterLink } from 'vue-router'
 import { useAppStore } from '@/stores/app'
+import ThemeToggle from '@/components/common/ThemeToggle.vue'
 import {
   MagnifyingGlassIcon,
   ArrowUpTrayIcon,
@@ -46,6 +47,14 @@ const navigation = [
         </li>
       </ul>
     </nav>
+
+    <!-- Theme Toggle -->
+    <div class="border-t border-gray-700 p-4">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-semibold uppercase tracking-wider text-gray-400">Theme</span>
+        <ThemeToggle />
+      </div>
+    </div>
 
     <!-- Stats at bottom -->
     <div class="border-t border-gray-700 p-4">

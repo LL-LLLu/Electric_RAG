@@ -102,6 +102,7 @@ class Page(Base):
     ai_equipment_list = Column(Text)  # JSON list of equipment identified by AI
     image_path = Column(String(500))
     embedding = Column(Vector(384))
+    drawing_type = Column(String(50), index=True)  # ONE_LINE, PID, CONTROL_SCHEMATIC, WIRING_DIAGRAM, SCHEDULE, GENERAL
 
     document = relationship("Document", back_populates="pages")
     equipment_locations = relationship("EquipmentLocation", back_populates="page")
@@ -185,6 +186,50 @@ class EquipmentRelationship(Base):
     __table_args__ = (
         Index('idx_relationship_source', 'source_id', 'relationship_type'),
         Index('idx_relationship_target', 'target_id', 'relationship_type'),
+    )
+
+
+class DetailedConnection(Base):
+    """Detailed connections between equipment with rich metadata"""
+    __tablename__ = "detailed_connections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    document_id = Column(Integer, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    page_number = Column(Integer, nullable=False)
+    source_tag = Column(String(100), nullable=False, index=True)
+    target_tag = Column(String(100), nullable=False, index=True)
+    category = Column(String(50), nullable=False, index=True)  # ELECTRICAL, CONTROL, MECHANICAL, INTERLOCK
+    connection_type = Column(String(50))  # FEEDS, CONTROLS, PIPE, DUCT, DRIVES, etc.
+
+    # Electrical details
+    voltage = Column(String(50))
+    breaker = Column(String(100))
+    wire_size = Column(String(50))
+    wire_numbers = Column(Text)  # JSON array
+    load = Column(String(100))
+
+    # Control details
+    signal_type = Column(String(50))  # 4-20mA, 0-10V, 24VDC, dry contact
+    io_type = Column(String(20))  # AI, AO, DI, DO
+    point_name = Column(String(100))
+    function = Column(Text)
+
+    # Mechanical details
+    medium = Column(String(100))  # CHW, HW, steam, air, etc.
+    pipe_size = Column(String(50))
+    pipe_spec = Column(String(100))
+    inline_devices = Column(Text)  # JSON array of valves/dampers
+
+    # General
+    details_json = Column(Text)  # Full details as JSON for flexibility
+    confidence = Column(Float, default=0.7)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_detailed_conn_doc_page', 'document_id', 'page_number'),
+        Index('idx_detailed_conn_source', 'source_tag'),
+        Index('idx_detailed_conn_target', 'target_tag'),
+        Index('idx_detailed_conn_category', 'category'),
     )
 
 

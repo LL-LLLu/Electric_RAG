@@ -2,7 +2,7 @@ import json
 import logging
 from sqlalchemy.orm import Session
 
-from app.models.database import Document, Page, Equipment, EquipmentLocation, EquipmentRelationship
+from app.models.database import Document, Page, Equipment, EquipmentLocation, EquipmentRelationship, DetailedConnection
 from app.services.ocr_service import ocr_service
 from app.services.extraction_service import extraction_service, ExtractedEquipment
 from app.services.embedding_service import embedding_service
@@ -115,7 +115,8 @@ class DocumentProcessor:
                     ai_analysis=ai_result.get("analysis", ""),
                     ai_equipment_list=json.dumps(ai_equipment_tags),
                     image_path=page_data["image_path"],
-                    embedding=embedding
+                    embedding=embedding,
+                    drawing_type=ai_result.get("drawing_type")
                 )
                 db.add(page)
                 db.flush()
@@ -153,7 +154,10 @@ class DocumentProcessor:
 
                 # Extract relationships from AI analysis
                 ai_relationships = ai_result.get("relationships", [])
+                detailed_connections = ai_result.get("detailed_connections", [])
                 equipment_tags = list(all_equipment.keys())
+
+                # Regex-based relationship extraction
                 relationships = extraction_service.extract_relationships(
                     page_data["ocr_text"],
                     equipment_tags
@@ -162,6 +166,56 @@ class DocumentProcessor:
                     rel["document_id"] = document_id
                     rel["page_number"] = page_data["page_number"]
                 all_relationships.extend(relationships)
+
+                # Parse and add AI-detected relationships
+                if ai_relationships:
+                    parsed_ai_rels = extraction_service.parse_ai_relationships(
+                        ai_relationships,
+                        equipment_tags
+                    )
+                    for rel in parsed_ai_rels:
+                        rel["document_id"] = document_id
+                        rel["page_number"] = page_data["page_number"]
+                    all_relationships.extend(parsed_ai_rels)
+                    if parsed_ai_rels:
+                        print(f"[PIPELINE] Page {page_num}: Parsed {len(parsed_ai_rels)} AI relationships")
+
+                # Save detailed connections from multi-agent analysis
+                if detailed_connections:
+                    for conn in detailed_connections:
+                        details = conn.get("details", {})
+                        wire_info = details.get("wire_info", {})
+
+                        detailed_conn = DetailedConnection(
+                            document_id=document_id,
+                            page_number=page_data["page_number"],
+                            source_tag=conn.get("source", ""),
+                            target_tag=conn.get("target", ""),
+                            category=conn.get("category", "UNKNOWN"),
+                            connection_type=conn.get("connection_type", ""),
+                            # Electrical details
+                            voltage=details.get("voltage"),
+                            breaker=details.get("breaker"),
+                            wire_size=wire_info.get("size") if isinstance(wire_info, dict) else None,
+                            wire_numbers=json.dumps(wire_info.get("wire_numbers", [])) if isinstance(wire_info, dict) else None,
+                            load=details.get("load"),
+                            # Control details
+                            signal_type=details.get("signal_type"),
+                            io_type=conn.get("connection_type") if conn.get("category") == "CONTROL" else None,
+                            point_name=details.get("point_name"),
+                            function=details.get("function"),
+                            # Mechanical details
+                            medium=details.get("medium"),
+                            pipe_size=details.get("size"),
+                            pipe_spec=details.get("spec"),
+                            inline_devices=json.dumps(details.get("inline_devices", [])) if details.get("inline_devices") else None,
+                            # General
+                            details_json=json.dumps(details),
+                            confidence=0.7
+                        )
+                        db.add(detailed_conn)
+
+                    print(f"[PIPELINE] Page {page_num}: Saved {len(detailed_connections)} detailed connections")
 
                 # Update progress
                 document.pages_processed = page_num

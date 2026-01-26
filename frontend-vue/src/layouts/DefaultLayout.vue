@@ -3,7 +3,7 @@ import AppSidebar from '@/components/common/AppSidebar.vue'
 </script>
 
 <template>
-  <div class="flex h-screen bg-gray-50">
+  <div class="flex h-screen bg-gray-50 dark:bg-gray-900">
     <!-- Sidebar -->
     <AppSidebar />
 

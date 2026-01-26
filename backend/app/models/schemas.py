@@ -141,6 +141,10 @@ class DocumentCreate(DocumentBase):
     pass
 
 
+class DocumentProjectAssign(BaseModel):
+    project_id: Optional[int] = None  # None means unassign from project
+
+
 class DocumentResponse(DocumentBase):
     id: int
     filename: str
@@ -160,6 +164,7 @@ class PageSummary(BaseModel):
     id: int
     page_number: int
     equipment_count: int = 0
+    drawing_type: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -203,6 +208,7 @@ class EquipmentResponse(BaseModel):
 
 
 class EquipmentLocationResponse(BaseModel):
+    document_id: int
     document_filename: str
     document_title: Optional[str]
     page_number: int
@@ -210,6 +216,51 @@ class EquipmentLocationResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# Cross-Document Relationship Schemas
+class PageAppearance(BaseModel):
+    page_number: int
+    context_text: Optional[str] = None
+    drawing_type: Optional[str] = None
+
+
+class DocumentAppearance(BaseModel):
+    document_id: int
+    document_filename: str
+    document_title: Optional[str] = None
+    pages: List[PageAppearance] = []
+
+
+class DocumentAppearancesResponse(BaseModel):
+    equipment_tag: str
+    total_documents: int
+    total_pages: int
+    documents: List[DocumentAppearance] = []
+
+
+# Power Flow Tracing Schemas
+class PowerFlowNode(BaseModel):
+    tag: str
+    depth: int
+    breaker: Optional[str] = None
+    voltage: Optional[str] = None
+    wire_size: Optional[str] = None
+    load: Optional[str] = None
+    document_id: Optional[int] = None
+    page_number: Optional[int] = None
+    # For upstream nodes
+    feeds: Optional[str] = None
+    # For downstream nodes
+    fed_by: Optional[str] = None
+
+
+class PowerFlowResponse(BaseModel):
+    equipment_tag: str
+    upstream_tree: List[PowerFlowNode] = []
+    downstream_tree: List[PowerFlowNode] = []
+    total_upstream: int = 0
+    total_downstream: int = 0
 
 
 class RelationshipResponse(BaseModel):
@@ -223,10 +274,42 @@ class RelationshipResponse(BaseModel):
         from_attributes = True
 
 
+class DetailedConnectionResponse(BaseModel):
+    id: int
+    document_id: int
+    page_number: int
+    source_tag: str
+    target_tag: str
+    category: str  # ELECTRICAL, CONTROL, MECHANICAL, INTERLOCK
+    connection_type: Optional[str]
+    # Electrical
+    voltage: Optional[str]
+    breaker: Optional[str]
+    wire_size: Optional[str]
+    wire_numbers: Optional[str]
+    load: Optional[str]
+    # Control
+    signal_type: Optional[str]
+    io_type: Optional[str]
+    point_name: Optional[str]
+    function: Optional[str]
+    # Mechanical
+    medium: Optional[str]
+    pipe_size: Optional[str]
+    pipe_spec: Optional[str]
+    inline_devices: Optional[str]
+    # General
+    confidence: float = 0.7
+
+    class Config:
+        from_attributes = True
+
+
 class EquipmentDetail(EquipmentResponse):
     locations: List[EquipmentLocationResponse] = []
     controls: List[RelationshipResponse] = []
     controlled_by: List[RelationshipResponse] = []
+    detailed_connections: List[DetailedConnectionResponse] = []
 
 
 class RelationshipCreate(BaseModel):

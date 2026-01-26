@@ -117,11 +117,16 @@ export interface PageSummary {
   id: number
   page_number: number
   equipment_count: number
+  drawing_type: string | null
 }
 
 export interface DocumentDetail extends Document {
   equipment_count: number
   pages: PageSummary[]
+}
+
+export interface DocumentProjectAssign {
+  project_id: number | null  // null means unassign from project
 }
 
 // ============================================
@@ -140,6 +145,7 @@ export interface Equipment {
 }
 
 export interface EquipmentLocation {
+  document_id: number
   document_filename: string
   document_title: string | null
   page_number: number
