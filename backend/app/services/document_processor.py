@@ -186,28 +186,40 @@ class DocumentProcessor:
                         details = conn.get("details", {})
                         wire_info = details.get("wire_info", {})
 
+                        # Helper to safely convert to string (serialize dicts/lists)
+                        def to_str(val, max_len=None):
+                            if val is None:
+                                return None
+                            if isinstance(val, (dict, list)):
+                                result = json.dumps(val)
+                            else:
+                                result = str(val)
+                            if max_len and len(result) > max_len:
+                                result = result[:max_len]
+                            return result
+
                         detailed_conn = DetailedConnection(
                             document_id=document_id,
                             page_number=page_data["page_number"],
-                            source_tag=conn.get("source", ""),
-                            target_tag=conn.get("target", ""),
-                            category=conn.get("category", "UNKNOWN"),
-                            connection_type=conn.get("connection_type", ""),
+                            source_tag=to_str(conn.get("source", ""), 100),
+                            target_tag=to_str(conn.get("target", ""), 100),
+                            category=to_str(conn.get("category", "UNKNOWN"), 50),
+                            connection_type=to_str(conn.get("connection_type", ""), 50),
                             # Electrical details
-                            voltage=details.get("voltage"),
-                            breaker=details.get("breaker"),
-                            wire_size=wire_info.get("size") if isinstance(wire_info, dict) else None,
+                            voltage=to_str(details.get("voltage"), 50),
+                            breaker=to_str(details.get("breaker"), 100),
+                            wire_size=to_str(wire_info.get("size") if isinstance(wire_info, dict) else None, 50),
                             wire_numbers=json.dumps(wire_info.get("wire_numbers", [])) if isinstance(wire_info, dict) else None,
-                            load=details.get("load"),
+                            load=to_str(details.get("load"), 100),
                             # Control details
-                            signal_type=details.get("signal_type"),
-                            io_type=conn.get("connection_type") if conn.get("category") == "CONTROL" else None,
-                            point_name=details.get("point_name"),
-                            function=details.get("function"),
+                            signal_type=to_str(details.get("signal_type"), 50),
+                            io_type=to_str(conn.get("connection_type") if conn.get("category") == "CONTROL" else None, 20),
+                            point_name=to_str(details.get("point_name"), 100),
+                            function=to_str(details.get("function")),
                             # Mechanical details
-                            medium=details.get("medium"),
-                            pipe_size=details.get("size"),
-                            pipe_spec=details.get("spec"),
+                            medium=to_str(details.get("medium"), 100),
+                            pipe_size=to_str(details.get("size"), 50),
+                            pipe_spec=to_str(details.get("spec"), 100),
                             inline_devices=json.dumps(details.get("inline_devices", [])) if details.get("inline_devices") else None,
                             # General
                             details_json=json.dumps(details),
