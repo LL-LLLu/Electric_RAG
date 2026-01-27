@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+from datetime import datetime
 from typing import Optional
 from sqlalchemy.orm import Session
 
@@ -44,6 +45,12 @@ class SupplementaryProcessor:
                 structured_data, chunks = word_processor.parse_file(file_path)
             else:
                 raise ValueError(f"Unknown document type: {document.document_type}")
+
+            # Validate parser output
+            if structured_data is None:
+                structured_data = []
+            if chunks is None:
+                chunks = []
 
             logger.info(f"Extracted {len(structured_data)} data entries and {len(chunks)} chunks")
 
@@ -166,6 +173,12 @@ class SupplementaryProcessor:
             EquipmentData.equipment_id.isnot(None)
         ).distinct().all()
 
+        if not equipment_ids:
+            logger.debug(f"No equipment profiles to rebuild for document {document.id}")
+            return
+
+        logger.info(f"Rebuilding {len(equipment_ids)} equipment profiles for document {document.id}")
+
         for (eq_id,) in equipment_ids:
             self._rebuild_profile(db, eq_id)
 
@@ -204,7 +217,11 @@ class SupplementaryProcessor:
         seen_docs = set()
 
         for entry in data_entries:
-            data = json.loads(entry.data_json)
+            try:
+                data = json.loads(entry.data_json)
+            except json.JSONDecodeError as e:
+                logger.warning(f"Invalid JSON in equipment data {entry.id}: {e}")
+                continue
 
             # Track source documents
             doc = entry.document
@@ -235,7 +252,6 @@ class SupplementaryProcessor:
 
         if profile:
             profile.profile_json = json.dumps(profile_data, default=str)
-            from datetime import datetime
             profile.last_updated = datetime.utcnow()
         else:
             profile = EquipmentProfile(
