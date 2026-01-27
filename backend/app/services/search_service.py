@@ -1,6 +1,8 @@
+import json
 import re
 import time
 import logging
+from datetime import datetime
 from typing import List
 from sqlalchemy.orm import Session
 from sqlalchemy import text, or_, func
@@ -462,7 +464,6 @@ class SearchService:
 
     def _search_supplementary_chunks(self, db: Session, query: str, limit: int, project_id: int = None) -> List[SearchResult]:
         """Search supplementary document chunks using vector similarity"""
-        import json
         query_embedding = embedding_service.generate_embedding(query)
 
         # Build SQL with optional project filter
@@ -482,6 +483,7 @@ class SearchService:
                 sd.original_filename,
                 sd.document_type,
                 sd.project_id,
+                sd.created_at,
                 1 - (sc.embedding <=> CAST(:embedding AS vector)) as similarity
             FROM supplementary_chunks sc
             JOIN supplementary_documents sd ON sc.document_id = sd.id
@@ -509,7 +511,7 @@ class SearchService:
                 area=None,
                 file_size=None,
                 page_count=1,
-                upload_date=None,
+                upload_date=row.created_at or datetime.utcnow(),
                 processed=2
             )
 
@@ -520,8 +522,8 @@ class SearchService:
                     tags = json.loads(row.equipment_tags)
                     if tags:
                         equipment_brief = EquipmentBrief(id=0, tag=tags[0], equipment_type="UNKNOWN")
-                except:
-                    pass
+                except (json.JSONDecodeError, TypeError, IndexError) as e:
+                    logger.debug(f"Failed to parse equipment tags: {e}")
 
             results.append(SearchResult(
                 equipment=equipment_brief,
@@ -538,7 +540,6 @@ class SearchService:
     def _search_equipment_data(self, db: Session, tags: List[str], data_types: List[str] = None,
                                limit: int = 10, project_id: int = None) -> List[SearchResult]:
         """Search structured equipment data by tags and optional data types"""
-        import json
         results = []
 
         for tag in tags:
@@ -573,7 +574,8 @@ class SearchService:
                 try:
                     data = json.loads(entry.data_json)
                     snippet = f"{entry.data_type}: " + ", ".join(f"{k}={v}" for k, v in list(data.items())[:5])
-                except:
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.debug(f"Failed to parse equipment data JSON: {e}")
                     snippet = f"{entry.data_type} data for {entry.equipment_tag}"
 
                 results.append(SearchResult(
