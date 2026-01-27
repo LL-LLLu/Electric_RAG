@@ -9,6 +9,14 @@ const emit = defineEmits<{
 const isDragOver = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 
+// Supported file extensions
+const SUPPORTED_EXTENSIONS = ['.pdf', '.png', '.jpg', '.jpeg', '.tiff', '.tif', '.bmp', '.gif', '.webp', '.heic', '.heif']
+
+function isSupportedFile(file: File): boolean {
+  const ext = file.name.toLowerCase().substring(file.name.lastIndexOf('.'))
+  return SUPPORTED_EXTENSIONS.includes(ext) || file.type.startsWith('image/')
+}
+
 function handleDragEnter(event: DragEvent) {
   event.preventDefault()
   isDragOver.value = true
@@ -52,7 +60,7 @@ function handleFileSelect(event: Event) {
 function processFiles(files: FileList) {
   for (let i = 0; i < files.length; i++) {
     const file = files.item(i)
-    if (file && (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))) {
+    if (file && isSupportedFile(file)) {
       emit('upload', file)
     }
   }
@@ -76,7 +84,7 @@ function processFiles(files: FileList) {
     <input
       ref="fileInput"
       type="file"
-      accept=".pdf"
+      accept=".pdf,.png,.jpg,.jpeg,.tiff,.tif,.bmp,.gif,.webp,.heic,.heif,image/*"
       class="hidden"
       multiple
       @change="handleFileSelect"
@@ -89,8 +97,8 @@ function processFiles(files: FileList) {
       />
 
       <p class="text-lg font-medium text-gray-700 mb-1">
-        <span v-if="isDragOver">Drop PDF files here</span>
-        <span v-else>Drag and drop PDF files here</span>
+        <span v-if="isDragOver">Drop files here</span>
+        <span v-else>Drag and drop files here</span>
       </p>
 
       <p class="text-sm text-gray-500 mb-4">
@@ -98,7 +106,7 @@ function processFiles(files: FileList) {
       </p>
 
       <p class="text-xs text-gray-400">
-        Only PDF files are accepted
+        PDF and image files (PNG, JPG, TIFF, etc.)
       </p>
     </div>
   </div>
