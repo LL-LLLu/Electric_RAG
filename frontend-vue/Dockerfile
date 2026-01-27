@@ -21,14 +21,18 @@ RUN npm run build
 # Production stage
 FROM nginx:alpine
 
-# Copy nginx configuration
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Copy nginx configuration template
+COPY nginx.conf /etc/nginx/templates/default.conf.template
 
 # Copy built assets from build stage
 COPY --from=build /app/dist /usr/share/nginx/html
 
-# Expose port 80
-EXPOSE 80
+# Railway uses dynamic PORT - nginx:alpine supports envsubst automatically
+# when using /etc/nginx/templates/*.template files
+ENV PORT=80
 
-# Start nginx
-CMD ["nginx", "-g", "daemon off;"]
+# Expose the port
+EXPOSE ${PORT}
+
+# Use shell to substitute PORT and start nginx
+CMD ["/bin/sh", "-c", "envsubst '${PORT}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
