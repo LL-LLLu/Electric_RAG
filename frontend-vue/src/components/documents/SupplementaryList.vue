@@ -7,11 +7,12 @@
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
           </svg>
-          <span>Upload Document</span>
+          <span>Upload Documents</span>
           <input
             type="file"
             class="hidden"
             accept=".xlsx,.xls,.csv,.docx"
+            multiple
             @change="handleFileSelect"
           />
         </label>
@@ -31,7 +32,9 @@
       </div>
 
       <p v-if="uploadError" class="mt-2 text-red-600 text-sm">{{ uploadError }}</p>
-      <p v-if="uploading" class="mt-2 text-blue-600 text-sm">Uploading...</p>
+      <p v-if="uploading" class="mt-2 text-blue-600 text-sm">
+        Uploading {{ uploadProgress.current }} of {{ uploadProgress.total }}...
+      </p>
     </div>
 
     <!-- Documents Grid -->
@@ -158,6 +161,7 @@ const emit = defineEmits<{
 const documents = ref<SupplementaryDocument[]>([])
 const loading = ref(true)
 const uploading = ref(false)
+const uploadProgress = ref({ current: 0, total: 0 })
 const uploadError = ref('')
 const selectedCategory = ref<ContentCategory | ''>('')
 const deleteTarget = ref<SupplementaryDocument | null>(null)
@@ -176,28 +180,43 @@ async function loadDocuments() {
   }
 }
 
-// Handle file selection
+// Handle file selection (supports multiple files)
 async function handleFileSelect(event: Event) {
   const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
+  const files = input.files
+  if (!files || files.length === 0) return
 
   uploadError.value = ''
   uploading.value = true
+  uploadProgress.value = { current: 0, total: files.length }
 
-  try {
-    const category = selectedCategory.value || undefined
-    const doc = await uploadSupplementary(props.projectId, file, category)
-    documents.value.unshift(doc)
-    emit('document-uploaded', doc)
-    selectedCategory.value = ''
-  } catch (err: any) {
-    uploadError.value = err.response?.data?.detail || 'Failed to upload document'
-    console.error('Upload failed:', err)
-  } finally {
-    uploading.value = false
-    input.value = '' // Reset file input
+  const category = selectedCategory.value || undefined
+  const errors: string[] = []
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i]
+    uploadProgress.value.current = i + 1
+
+    try {
+      const doc = await uploadSupplementary(props.projectId, file, category)
+      documents.value.unshift(doc)
+      emit('document-uploaded', doc)
+    } catch (err: any) {
+      const errorMsg = err.response?.data?.detail || 'Failed to upload'
+      errors.push(`${file.name}: ${errorMsg}`)
+      console.error(`Upload failed for ${file.name}:`, err)
+    }
   }
+
+  if (errors.length > 0) {
+    uploadError.value = errors.length === 1
+      ? errors[0]
+      : `${errors.length} files failed to upload`
+  }
+
+  selectedCategory.value = ''
+  uploading.value = false
+  input.value = '' // Reset file input
 }
 
 // Confirm delete
