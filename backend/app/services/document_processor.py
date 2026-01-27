@@ -27,19 +27,12 @@ class DocumentProcessor:
             document.processed = 1
             db.commit()
 
-            print(f"\n{'#'*60}")
-            print(f"# DOCUMENT PROCESSING STARTED")
-            print(f"# ID: {document_id}")
-            print(f"# File: {document.original_filename}")
-            print(f"# Size: {document.file_size / 1024 / 1024:.1f} MB")
-            print(f"{'#'*60}\n")
+            logger.info(f"DOCUMENT PROCESSING STARTED - ID: {document_id}, File: {document.original_filename}, Size: {document.file_size / 1024 / 1024:.1f} MB")
 
             pipeline_start = time.time()
-            logger.info(f"Processing document: {document.filename}")
 
             # Step 1: OCR
-            print(f"\n[PIPELINE] Step 1/3: Text Extraction")
-            print(f"-" * 40)
+            logger.info("[PIPELINE] Step 1/3: Text Extraction")
             step1_start = time.time()
 
             pages_data = ocr_service.process_document(document.file_path, document_id)
@@ -47,11 +40,10 @@ class DocumentProcessor:
             document.pages_processed = 0
             db.commit()
 
-            print(f"[PIPELINE] Step 1 completed in {time.time() - step1_start:.1f}s")
+            logger.info(f"[PIPELINE] Step 1 completed in {time.time() - step1_start:.1f}s")
 
             # Step 2: Process each page with AI analysis
-            print(f"\n[PIPELINE] Step 2/4: AI Analysis & Equipment Extraction")
-            print(f"-" * 40)
+            logger.info("[PIPELINE] Step 2/4: AI Analysis & Equipment Extraction")
             step2_start = time.time()
 
             all_equipment: dict[str, ExtractedEquipment] = {}
@@ -105,7 +97,7 @@ class DocumentProcessor:
                 embedding = embedding_service.generate_embedding(text_for_embedding)
                 embed_time = time.time() - embed_start
 
-                print(f"[PIPELINE] Page {page_num}/{document.page_count} | {len(equipment_list)} equipment | embed:{embed_time:.2f}s | total:{time.time()-page_start:.2f}s")
+                logger.info(f"[PIPELINE] Page {page_num}/{document.page_count} | {len(equipment_list)} equipment | embed:{embed_time:.2f}s | total:{time.time()-page_start:.2f}s")
 
                 page = Page(
                     document_id=document_id,
@@ -178,7 +170,7 @@ class DocumentProcessor:
                         rel["page_number"] = page_data["page_number"]
                     all_relationships.extend(parsed_ai_rels)
                     if parsed_ai_rels:
-                        print(f"[PIPELINE] Page {page_num}: Parsed {len(parsed_ai_rels)} AI relationships")
+                        logger.info(f"[PIPELINE] Page {page_num}: Parsed {len(parsed_ai_rels)} AI relationships")
 
                 # Save detailed connections from multi-agent analysis
                 if detailed_connections:
@@ -227,20 +219,19 @@ class DocumentProcessor:
                         )
                         db.add(detailed_conn)
 
-                    print(f"[PIPELINE] Page {page_num}: Saved {len(detailed_connections)} detailed connections")
+                    logger.info(f"[PIPELINE] Page {page_num}: Saved {len(detailed_connections)} detailed connections")
 
                 # Update progress
                 document.pages_processed = page_num
                 db.commit()
                 logger.info(f"Document {document_id}: Processed page {page_num}/{document.page_count}")
 
-            print(f"[PIPELINE] Step 2 completed in {time.time() - step2_start:.1f}s")
-            print(f"[PIPELINE] Total equipment found: {len(all_equipment)}")
-            print(f"[PIPELINE] Total relationships found: {len(all_relationships)}")
+            logger.info(f"[PIPELINE] Step 2 completed in {time.time() - step2_start:.1f}s")
+            logger.info(f"[PIPELINE] Total equipment found: {len(all_equipment)}")
+            logger.info(f"[PIPELINE] Total relationships found: {len(all_relationships)}")
 
             # Step 3: Generate document summary
-            print(f"\n[PIPELINE] Step 3/4: Generating Document Summary")
-            print(f"-" * 40)
+            logger.info("[PIPELINE] Step 3/4: Generating Document Summary")
             step3_start = time.time()
 
             doc_summary = ai_analysis_service.generate_document_summary(
@@ -249,13 +240,12 @@ class DocumentProcessor:
             )
             if doc_summary:
                 document.title = doc_summary[:500]  # Store summary as title
-                print(f"[PIPELINE] Document summary: {doc_summary[:200]}...")
+                logger.info(f"[PIPELINE] Document summary: {doc_summary[:200]}...")
 
-            print(f"[PIPELINE] Step 3 completed in {time.time() - step3_start:.1f}s")
+            logger.info(f"[PIPELINE] Step 3 completed in {time.time() - step3_start:.1f}s")
 
             # Step 4: Save relationships
-            print(f"\n[PIPELINE] Step 4/4: Saving Relationships")
-            print(f"-" * 40)
+            logger.info("[PIPELINE] Step 4/4: Saving Relationships")
             step4_start = time.time()
             for rel in all_relationships:
                 source = db.query(Equipment).filter(Equipment.tag == rel["source"]).first()
@@ -282,16 +272,10 @@ class DocumentProcessor:
             document.processed = 2
             db.commit()
 
-            print(f"[PIPELINE] Step 4 completed in {time.time() - step4_start:.1f}s")
+            logger.info(f"[PIPELINE] Step 4 completed in {time.time() - step4_start:.1f}s")
 
             total_time = time.time() - pipeline_start
-            print(f"\n{'#'*60}")
-            print(f"# DOCUMENT PROCESSING COMPLETED")
-            print(f"# Total time: {total_time:.1f}s ({total_time/60:.1f} min)")
-            print(f"# Pages: {len(pages_data)}")
-            print(f"# Equipment: {len(all_equipment)}")
-            print(f"# Relationships: {len(all_relationships)}")
-            print(f"{'#'*60}\n")
+            logger.info(f"DOCUMENT PROCESSING COMPLETED - Time: {total_time:.1f}s ({total_time/60:.1f} min), Pages: {len(pages_data)}, Equipment: {len(all_equipment)}, Relationships: {len(all_relationships)}")
 
             logger.info(f"Document {document_id} processed successfully. "
                        f"Pages: {len(pages_data)}, Equipment: {len(all_equipment)}")

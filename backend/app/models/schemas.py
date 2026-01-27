@@ -455,3 +455,35 @@ class HealthResponse(BaseModel):
     status: str
     database: str
     version: str
+
+
+# Multi-Agent Search Schemas
+class AgentContribution(BaseModel):
+    """Summary of a single agent's contribution to the answer"""
+    agent_name: str
+    domain: str
+    summary: str
+    confidence: float
+    source_count: int
+
+
+class MultiAgentSource(BaseModel):
+    """Source from multi-agent search"""
+    document_name: str
+    page_number: str  # Can be page number or location string
+    snippet: Optional[str] = None
+    equipment_tag: Optional[str] = None
+    source_type: str  # pdf, supplementary, graph, equipment_db
+    match_type: str
+    relevance_score: float = 0.0
+
+
+class MultiAgentResponse(BaseModel):
+    """Response from multi-agent search"""
+    query: str
+    answer: str
+    sources: List[MultiAgentSource]
+    agents_used: List[str]
+    agent_contributions: List[AgentContribution]
+    confidence: float
+    was_multi_agent: bool = True

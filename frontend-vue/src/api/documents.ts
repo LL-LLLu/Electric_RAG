@@ -26,6 +26,14 @@ export interface DocumentPagesResponse {
   }>
 }
 
+// Bulk operation types
+export interface BulkOperationResponse {
+  success_count: number
+  failed_count: number
+  failed_ids: number[]
+  message: string
+}
+
 /**
  * List documents with pagination
  * Note: Backend returns Document[] directly, not a pagination wrapper
@@ -141,6 +149,37 @@ export async function getPages(id: number): Promise<DocumentPagesResponse> {
   return response.data
 }
 
+/**
+ * Bulk assign documents to a project
+ */
+export async function bulkAssign(documentIds: number[], projectId: number | null): Promise<BulkOperationResponse> {
+  const response = await api.post<BulkOperationResponse>('/api/documents/bulk/assign', {
+    document_ids: documentIds,
+    project_id: projectId
+  })
+  return response.data
+}
+
+/**
+ * Bulk delete documents
+ */
+export async function bulkDelete(documentIds: number[]): Promise<BulkOperationResponse> {
+  const response = await api.post<BulkOperationResponse>('/api/documents/bulk/delete', {
+    document_ids: documentIds
+  })
+  return response.data
+}
+
+/**
+ * Bulk reprocess documents
+ */
+export async function bulkReprocess(documentIds: number[]): Promise<BulkOperationResponse> {
+  const response = await api.post<BulkOperationResponse>('/api/documents/bulk/reprocess', {
+    document_ids: documentIds
+  })
+  return response.data
+}
+
 // Export all functions as a module
 export const documentsApi = {
   list,
@@ -153,6 +192,9 @@ export const documentsApi = {
   assignToProject,
   getPageImageUrl,
   getPages,
+  bulkAssign,
+  bulkDelete,
+  bulkReprocess,
 }
 
 export default documentsApi

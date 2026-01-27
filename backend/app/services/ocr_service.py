@@ -86,7 +86,7 @@ class OCRService:
     def check_pdf_has_text(self, pdf_path: str) -> Tuple[bool, int]:
         """Check if PDF has extractable text and return page count"""
         print(f"\n{'='*60}")
-        print(f"[OCR] Analyzing PDF: {pdf_path}")
+        logger.debug(f"[OCR] Analyzing PDF: {pdf_path}")
         print(f"{'='*60}")
 
         doc = fitz.open(pdf_path)
@@ -98,17 +98,17 @@ class OCRService:
         for i in range(sample_pages):
             text = doc[i].get_text()
             total_text_len += len(text.strip())
-            print(f"[OCR] Sample page {i+1}: {len(text.strip())} characters")
+            logger.debug(f"[OCR] Sample page {i+1}: {len(text.strip())} characters")
 
         doc.close()
 
         avg_text_per_page = total_text_len / sample_pages if sample_pages > 0 else 0
         has_text = avg_text_per_page > self.min_text_threshold
 
-        print(f"[OCR] Total pages: {page_count}")
-        print(f"[OCR] Avg chars/page: {avg_text_per_page:.0f}")
-        print(f"[OCR] Has extractable text: {has_text}")
-        print(f"[OCR] Method: {'DIRECT EXTRACTION (fast)' if has_text else 'OCR (slow)'}")
+        logger.debug(f"[OCR] Total pages: {page_count}")
+        logger.debug(f"[OCR] Avg chars/page: {avg_text_per_page:.0f}")
+        logger.debug(f"[OCR] Has extractable text: {has_text}")
+        logger.debug(f"[OCR] Method: {'DIRECT EXTRACTION (fast)' if has_text else 'OCR (slow)'}")
         print(f"{'='*60}\n")
 
         logger.info(f"PDF check: {page_count} pages, avg {avg_text_per_page:.0f} chars/page, has_text={has_text}")
@@ -179,7 +179,7 @@ class OCRService:
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 
         print(f"\n{'='*60}")
-        print(f"[OCR] Processing IMAGE file: {image_path}")
+        logger.debug(f"[OCR] Processing IMAGE file: {image_path}")
         print(f"{'='*60}")
 
         # Convert HEIC/HEIF to PNG if needed
@@ -204,12 +204,12 @@ class OCRService:
             shutil.copy(image_path, output_image_path)
 
         # OCR the image
-        print(f"[OCR] Running OCR on image...")
+        logger.debug(f"[OCR] Running OCR on image...")
         ocr_result = self.extract_text_from_image(output_image_path)
 
         total_time = time.time() - start_time
         text_preview = ocr_result["text"][:100].replace('\n', ' ') if ocr_result["text"] else "(no text)"
-        print(f"[OCR] COMPLETED: 1 page in {total_time:.1f}s | {len(ocr_result['text'])} chars | {text_preview}...")
+        logger.debug(f"[OCR] COMPLETED: 1 page in {total_time:.1f}s | {len(ocr_result['text'])} chars | {text_preview}...")
 
         return [{
             "page_number": 1,
@@ -245,7 +245,7 @@ class OCRService:
 
             extract_start = time.time()
             direct_data = self.extract_text_from_pdf_direct(pdf_path)
-            print(f"[OCR] Text extraction completed in {time.time() - extract_start:.1f}s")
+            logger.debug(f"[OCR] Text extraction completed in {time.time() - extract_start:.1f}s")
 
             # Still generate page images for viewing (but at lower DPI for speed)
             Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -276,7 +276,7 @@ class OCRService:
                     img_time = 0
 
                 text_preview = page_info["text"][:100].replace('\n', ' ') if page_info["text"] else "(no text)"
-                print(f"[OCR] Page {page_num}/{page_count} ({progress:.0f}%) | {len(page_info['text'])} chars | img:{img_time:.1f}s | {text_preview}...")
+                logger.debug(f"[OCR] Page {page_num}/{page_count} ({progress:.0f}%) | {len(page_info['text'])} chars | img:{img_time:.1f}s | {text_preview}...")
 
                 pages_data.append({
                     "page_number": page_num,
@@ -293,13 +293,13 @@ class OCRService:
         else:
             # Slow path: OCR required
             print(f"\n[OCR] Starting OCR (slow path) for {page_count} pages...")
-            print(f"[OCR] This may take a while - estimated {page_count * 15}s ({page_count * 15 / 60:.1f} min)")
+            logger.debug(f"[OCR] This may take a while - estimated {page_count * 15}s ({page_count * 15 / 60:.1f} min)")
             logger.info(f"Using OCR (slow) for {page_count} pages - PDF has no extractable text")
 
-            print(f"[OCR] Converting PDF to images...")
+            logger.debug(f"[OCR] Converting PDF to images...")
             img_start = time.time()
             image_paths = self.pdf_to_images(pdf_path, output_dir)
-            print(f"[OCR] Image conversion completed in {time.time() - img_start:.1f}s")
+            logger.debug(f"[OCR] Image conversion completed in {time.time() - img_start:.1f}s")
 
             pages_data = []
             for i, image_path in enumerate(image_paths):
@@ -307,7 +307,7 @@ class OCRService:
                 progress = (page_num / len(image_paths)) * 100
                 page_start = time.time()
 
-                print(f"[OCR] Processing page {page_num}/{len(image_paths)} ({progress:.0f}%)...", end=" ", flush=True)
+                logger.debug(f"[OCR] Processing page {page_num}/{len(image_paths)} ({progress:.0f}%)...", end=" ", flush=True)
                 logger.info(f"OCR processing page {page_num}/{len(image_paths)}")
 
                 ocr_result = self.extract_text_from_image(image_path)

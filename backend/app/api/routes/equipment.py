@@ -14,6 +14,52 @@ from app.models.schemas import (
 router = APIRouter()
 
 
+@router.get("/autocomplete")
+async def autocomplete_equipment_tags(
+    q: str = Query(..., min_length=1, description="Search query for equipment tags"),
+    limit: int = Query(default=10, le=50, description="Maximum suggestions to return"),
+    project_id: int = Query(default=None, description="Optional project ID to scope results"),
+    db: Session = Depends(get_db)
+):
+    """Get equipment tag suggestions for autocomplete.
+
+    Returns a list of equipment tags that match the query, ordered by relevance.
+    Useful for search box autocomplete functionality.
+    """
+    query = db.query(Equipment.tag, Equipment.equipment_type).distinct()
+
+    if project_id:
+        query = query.join(Document, Equipment.document_id == Document.id).filter(
+            Document.project_id == project_id
+        )
+
+    # Search by tag - prioritize tags that start with the query
+    search_term = q.upper()
+
+    # Get exact prefix matches first, then contains matches
+    prefix_matches = query.filter(
+        Equipment.tag.ilike(f"{q}%")
+    ).limit(limit).all()
+
+    results = [{"tag": tag, "type": eq_type} for tag, eq_type in prefix_matches]
+
+    # If we need more results, add contains matches
+    if len(results) < limit:
+        remaining = limit - len(results)
+        existing_tags = {r["tag"] for r in results}
+
+        contains_matches = query.filter(
+            Equipment.tag.ilike(f"%{q}%"),
+            ~Equipment.tag.ilike(f"{q}%")  # Exclude prefix matches already found
+        ).limit(remaining).all()
+
+        for tag, eq_type in contains_matches:
+            if tag not in existing_tags:
+                results.append({"tag": tag, "type": eq_type})
+
+    return {"suggestions": results, "query": q}
+
+
 @router.get("/", response_model=List[EquipmentResponse])
 async def list_equipment(
     skip: int = 0,

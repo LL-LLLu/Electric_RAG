@@ -10,6 +10,8 @@ from app.models.schemas import (
     ConversationDetail, MessageCreate, MessageResponse, SourceReference
 )
 from app.services.rag_service import rag_service
+from app.services.multi_agent_search_service import multi_agent_search_service
+from app.services.search_service import search_service
 
 router = APIRouter()
 
@@ -163,32 +165,58 @@ async def send_message(
     db.add(user_message)
     db.commit()
 
-    # Get AI response using RAG service with project scope
+    # Get AI response - use single-agent by default (now searches all doc types)
+    # Multi-agent only for explicitly complex queries
     try:
-        rag_response = rag_service.query(
-            db=db,
-            query=data.content,
-            project_id=conversation.project_id,
-            limit=5
-        )
+        # Quick check based on query only (no wasteful initial search)
+        use_multi_agent = multi_agent_search_service.should_use_multi_agent(data.content)
 
-        # Build source references
         sources = []
-        for source in rag_response.get("sources", []):
-            sources.append({
-                "document_id": source.get("document_id"),
-                "document_name": source.get("document_name", "Unknown"),
-                "page_number": source.get("page_number"),
-                "snippet": source.get("snippet"),
-                "bbox": source.get("bbox"),
-                "equipment_tag": source.get("equipment_tag")
-            })
+        if use_multi_agent:
+            # Use multi-agent for complex queries
+            multi_response = multi_agent_search_service.query(
+                db=db,
+                query=data.content,
+                project_id=conversation.project_id
+            )
+            answer = multi_response.answer
+
+            # Build source references from multi-agent response
+            for source in multi_response.sources:
+                sources.append({
+                    "document_id": None,  # Multi-agent sources may not have direct doc IDs
+                    "document_name": source.get("document_name", "Unknown"),
+                    "page_number": source.get("page_number"),
+                    "snippet": source.get("snippet"),
+                    "bbox": None,
+                    "equipment_tag": source.get("equipment_tag")
+                })
+        else:
+            # Use single-agent for simple queries
+            rag_response = rag_service.query(
+                db=db,
+                query=data.content,
+                project_id=conversation.project_id,
+                limit=25  # Balanced: comprehensive search, top results by relevance
+            )
+            answer = rag_response.get("answer", "I couldn't find relevant information.")
+
+            # Build source references from RAG response
+            for source in rag_response.get("sources", []):
+                sources.append({
+                    "document_id": source.get("document_id"),
+                    "document_name": source.get("document_name", "Unknown"),
+                    "page_number": source.get("page_number"),
+                    "snippet": source.get("snippet"),
+                    "bbox": source.get("bbox"),
+                    "equipment_tag": source.get("equipment_tag")
+                })
 
         # Save assistant message
         assistant_message = Message(
             conversation_id=conversation_id,
             role="assistant",
-            content=rag_response.get("answer", "I couldn't find relevant information."),
+            content=answer,
             sources=json.dumps(sources) if sources else None
         )
         db.add(assistant_message)

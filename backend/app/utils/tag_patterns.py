@@ -1,9 +1,12 @@
 """Equipment tag patterns for extraction"""
 
 EQUIPMENT_PATTERNS = [
-    # RTU - Remote Terminal Units (high priority - often missed)
-    (r'\bRTU[-_]?\d{1,4}[A-Z]?\b', 'RTU'),
-    (r'\bRTU\d{1,4}[A-Z]?\b', 'RTU'),
+    # RTU - Remote Terminal Units (high priority - multiple naming conventions)
+    # Patterns: RTU-D01, RTU-F02, RTU D01, RTU_123, RTU123A, RTU(S)
+    (r'\bRTU[-_\s]?[A-Z]\d{1,3}[A-Z]?\b', 'RTU'),  # RTU-D01, RTU-F02, RTU D01
+    (r'\bRTU[-_]?\d{1,4}[A-Z]?\b', 'RTU'),          # RTU-123, RTU_456, RTU1A
+    (r'\bRTU\([A-Z]\)\b', 'RTU'),                   # RTU(S), RTU(A)
+    (r'\bRTU\b', 'RTU'),                            # Plain RTU
     # Standard patterns: TYPE-NUMBER or TYPE_NUMBER
     (r'\b(FAN|AHU|FCU|VAV|MAU|EF|SF|RF)-?\d{1,4}[A-Z]?\b', 'FAN'),
     (r'\b(MOT|MTR|M)-?\d{1,4}[A-Z]?\b', 'MOTOR'),

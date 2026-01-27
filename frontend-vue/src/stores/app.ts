@@ -11,6 +11,10 @@ export const useAppStore = defineStore('app', () => {
   // Global loading state
   const loading = ref(false)
 
+  // UI state
+  const sidebarCollapsed = ref(false)
+  const chatExpanded = ref(false)
+
   // Application statistics
   const stats = reactive<AppStats>({
     documents: 0,
@@ -35,11 +39,33 @@ export const useAppStore = defineStore('app', () => {
     stats.pages = 0
   }
 
+  function toggleSidebar() {
+    sidebarCollapsed.value = !sidebarCollapsed.value
+  }
+
+  function toggleChatExpanded() {
+    chatExpanded.value = !chatExpanded.value
+  }
+
+  function setSidebarCollapsed(value: boolean) {
+    sidebarCollapsed.value = value
+  }
+
+  function setChatExpanded(value: boolean) {
+    chatExpanded.value = value
+  }
+
   return {
     loading,
     stats,
+    sidebarCollapsed,
+    chatExpanded,
     setLoading,
     updateStats,
-    resetStats
+    resetStats,
+    toggleSidebar,
+    toggleChatExpanded,
+    setSidebarCollapsed,
+    setChatExpanded
   }
 })

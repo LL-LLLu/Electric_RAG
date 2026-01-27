@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { UserIcon, CpuChipIcon } from '@heroicons/vue/24/outline'
+import { ref, computed } from 'vue'
+import { UserIcon, CpuChipIcon, ClipboardDocumentIcon, CheckIcon } from '@heroicons/vue/24/outline'
 import type { Message } from '@/types'
 import SourceCard from './SourceCard.vue'
 
@@ -14,9 +14,22 @@ const emit = defineEmits<{
 
 const isUser = computed(() => props.message.role === 'user')
 const hasSources = computed(() => props.message.sources && props.message.sources.length > 0)
+const copied = ref(false)
 
 function handleSourceClick(documentId: number, pageNumber: number) {
   emit('viewSource', documentId, pageNumber)
+}
+
+async function copyToClipboard() {
+  try {
+    await navigator.clipboard.writeText(props.message.content)
+    copied.value = true
+    setTimeout(() => {
+      copied.value = false
+    }, 2000)
+  } catch (err) {
+    console.error('Failed to copy:', err)
+  }
 }
 </script>
 
@@ -38,7 +51,7 @@ function handleSourceClick(documentId: number, pageNumber: number) {
     <div class="flex-1 min-w-0" :class="isUser ? 'text-right' : 'text-left'">
       <!-- Message bubble -->
       <div
-        class="inline-block px-4 py-2 rounded-lg max-w-[90%]"
+        class="inline-block px-4 py-2 rounded-lg max-w-[90%] relative group"
         :class="
           isUser
             ? 'bg-blue-600 text-white'
@@ -48,6 +61,18 @@ function handleSourceClick(documentId: number, pageNumber: number) {
         <p class="text-sm whitespace-pre-wrap break-words" :class="isUser ? '' : 'text-left'">
           {{ message.content }}
         </p>
+
+        <!-- Copy button (only for assistant messages) -->
+        <button
+          v-if="!isUser"
+          @click="copyToClipboard"
+          class="absolute top-1 right-1 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+          :class="copied ? 'text-green-500' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'"
+          :title="copied ? 'Copied!' : 'Copy to clipboard'"
+        >
+          <CheckIcon v-if="copied" class="w-4 h-4" />
+          <ClipboardDocumentIcon v-else class="w-4 h-4" />
+        </button>
       </div>
 
       <!-- Sources (only for assistant messages) -->

@@ -2,9 +2,10 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models.schemas import SearchRequest, SearchResponse, RAGResponse
+from app.models.schemas import SearchRequest, SearchResponse, RAGResponse, MultiAgentResponse
 from app.services.search_service import search_service
 from app.services.rag_service import rag_service
+from app.services.multi_agent_search_service import multi_agent_search_service
 
 router = APIRouter()
 
@@ -26,6 +27,107 @@ async def ask_question(
 ):
     """Ask a natural language question and get an AI-generated answer"""
     return rag_service.generate_answer(db, request.query)
+
+
+@router.post("/ask/multi-agent")
+async def ask_question_multi_agent(
+    request: SearchRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Ask a complex question using multi-agent search.
+
+    This endpoint uses multiple specialized agents to gather comprehensive
+    information across different domains (specs, relationships, IO, alarms, sequences).
+    Best for complex queries that span multiple aspects of equipment or systems.
+    """
+    response = multi_agent_search_service.query(
+        db=db,
+        query=request.query,
+        project_id=None  # Global search
+    )
+
+    # Convert dataclass to dict for JSON serialization
+    return {
+        "query": response.query,
+        "answer": response.answer,
+        "sources": response.sources,
+        "agents_used": response.agents_used,
+        "agent_contributions": [
+            {
+                "agent_name": c.agent_name,
+                "domain": c.domain,
+                "summary": c.summary,
+                "confidence": c.confidence,
+                "source_count": c.source_count
+            }
+            for c in response.agent_contributions
+        ],
+        "confidence": response.confidence,
+        "was_multi_agent": response.was_multi_agent
+    }
+
+
+@router.post("/ask/smart")
+async def ask_question_smart(
+    request: SearchRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Smart routing: Automatically decide between single-agent and multi-agent search.
+
+    Uses query complexity analysis to determine the best approach:
+    - Simple queries: Fast single-agent response
+    - Complex queries: Comprehensive multi-agent response
+    """
+    # First, do a quick search to analyze result diversity
+    initial_results = search_service.search(db, request.query, limit=20)
+
+    # Decide routing
+    if multi_agent_search_service.should_use_multi_agent(request.query, initial_results.results):
+        # Use multi-agent for complex queries
+        response = multi_agent_search_service.query(db, request.query)
+        return {
+            "query": response.query,
+            "answer": response.answer,
+            "sources": response.sources,
+            "agents_used": response.agents_used,
+            "agent_contributions": [
+                {
+                    "agent_name": c.agent_name,
+                    "domain": c.domain,
+                    "summary": c.summary,
+                    "confidence": c.confidence,
+                    "source_count": c.source_count
+                }
+                for c in response.agent_contributions
+            ],
+            "confidence": response.confidence,
+            "was_multi_agent": True
+        }
+    else:
+        # Use single-agent for simple queries
+        rag_response = rag_service.generate_answer(db, request.query)
+        return {
+            "query": rag_response.query,
+            "answer": rag_response.answer,
+            "sources": [
+                {
+                    "document_name": s.document.filename,
+                    "page_number": str(s.page_number),
+                    "snippet": s.snippet,
+                    "equipment_tag": s.equipment.tag if s.equipment else None,
+                    "source_type": "pdf" if s.match_type in ["exact", "semantic", "keyword"] else "supplementary",
+                    "match_type": s.match_type,
+                    "relevance_score": s.relevance_score
+                }
+                for s in rag_response.sources
+            ],
+            "agents_used": ["rag_service"],
+            "agent_contributions": [],
+            "confidence": rag_response.confidence,
+            "was_multi_agent": False
+        }
 
 
 @router.get("/equipment/{tag}/relationships")

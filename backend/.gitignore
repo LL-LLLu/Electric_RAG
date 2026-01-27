@@ -1,0 +1,27 @@
+# Data directories - keep directory but ignore contents
+uploads/*
+!uploads/.gitkeep
+chroma_data/*
+!chroma_data/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+*.egg-info/
+
+# Virtual environments
+venv/
+.venv/
+ENV/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+*.swp

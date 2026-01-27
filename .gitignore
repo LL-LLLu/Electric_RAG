@@ -11,11 +11,18 @@ ENV/
 # Environment
 .env
 .env.local
+.env.production
 
 # IDE
 .idea/
 .vscode/
 *.swp
+*.swo
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
 
 # Data
 uploads/
@@ -29,3 +36,19 @@ postgres_data/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Node.js
+node_modules/
+dist/
+*.log
+npm-debug.log*
+
+# Build artifacts
+*.egg-info/
+build/
+
+# Local development
+*.local
+
+# Claude
+.claude/

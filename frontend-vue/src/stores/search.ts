@@ -1,6 +1,34 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { SearchResult, RAGResponse, SearchMode } from '@/types'
+
+const SEARCH_HISTORY_KEY = 'electric-rag-search-history'
+const MAX_HISTORY_ITEMS = 20
+
+// Load search history from localStorage
+function loadSearchHistory(): string[] {
+  try {
+    const stored = localStorage.getItem(SEARCH_HISTORY_KEY)
+    if (stored) {
+      const parsed = JSON.parse(stored)
+      if (Array.isArray(parsed)) {
+        return parsed.slice(0, MAX_HISTORY_ITEMS)
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to load search history from localStorage:', e)
+  }
+  return []
+}
+
+// Save search history to localStorage
+function saveSearchHistory(queries: string[]) {
+  try {
+    localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(queries.slice(0, MAX_HISTORY_ITEMS)))
+  } catch (e) {
+    console.warn('Failed to save search history to localStorage:', e)
+  }
+}
 
 export const useSearchStore = defineStore('search', () => {
   // Search state
@@ -17,8 +45,13 @@ export const useSearchStore = defineStore('search', () => {
   // RAG answer (for AI mode)
   const ragAnswer = ref<RAGResponse | null>(null)
 
-  // Search history
-  const recentQueries = ref<string[]>([])
+  // Search history - load from localStorage on init
+  const recentQueries = ref<string[]>(loadSearchHistory())
+
+  // Persist search history to localStorage whenever it changes
+  watch(recentQueries, (newQueries) => {
+    saveSearchHistory(newQueries)
+  }, { deep: true })
 
   // Computed
   const hasResults = computed(() => results.value.length > 0)
@@ -79,9 +112,16 @@ export const useSearchStore = defineStore('search', () => {
     }
     // Add to front
     recentQueries.value.unshift(q)
-    // Keep only last 10
-    if (recentQueries.value.length > 10) {
+    // Keep only last MAX_HISTORY_ITEMS
+    if (recentQueries.value.length > MAX_HISTORY_ITEMS) {
       recentQueries.value.pop()
+    }
+  }
+
+  function removeFromHistory(q: string) {
+    const index = recentQueries.value.indexOf(q)
+    if (index !== -1) {
+      recentQueries.value.splice(index, 1)
     }
   }
 
@@ -124,6 +164,7 @@ export const useSearchStore = defineStore('search', () => {
     setRAGAnswer,
     clearResults,
     addToHistory,
+    removeFromHistory,
     clearHistory,
     reset
   }

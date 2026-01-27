@@ -79,6 +79,16 @@ export interface EquipmentListParams {
   document_id?: number
 }
 
+export interface AutocompleteSuggestion {
+  tag: string
+  type: string | null
+}
+
+export interface AutocompleteResponse {
+  suggestions: AutocompleteSuggestion[]
+  query: string
+}
+
 /**
  * List equipment with optional filters and pagination
  * Note: Backend returns Equipment[] directly, not a pagination wrapper
@@ -180,6 +190,17 @@ export async function getPowerFlow(tag: string, maxDepth: number = 10): Promise<
   return response.data
 }
 
+/**
+ * Get equipment tag suggestions for autocomplete
+ */
+export async function autocomplete(query: string, limit: number = 10, projectId?: number): Promise<AutocompleteResponse> {
+  const params: Record<string, string | number> = { q: query, limit }
+  if (projectId) params.project_id = projectId
+
+  const response = await api.get<AutocompleteResponse>('/api/equipment/autocomplete', { params })
+  return response.data
+}
+
 // Export all functions as a module
 export const equipmentApi = {
   list,
@@ -190,6 +211,7 @@ export const equipmentApi = {
   getGraph,
   getDocumentAppearances,
   getPowerFlow,
+  autocomplete,
 }
 
 export default equipmentApi

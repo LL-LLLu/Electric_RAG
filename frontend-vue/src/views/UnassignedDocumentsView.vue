@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   ArrowLeftIcon,
@@ -29,6 +29,99 @@ const documentToMove = ref<Document | null>(null)
 const allProjects = ref<Project[]>([])
 const selectedTargetProject = ref<number | null>(null)
 const moving = ref(false)
+
+// Multi-select state
+const selectedDocIds = ref<Set<number>>(new Set())
+const showBulkDeleteConfirm = ref(false)
+const showBulkMoveModal = ref(false)
+const bulkOperating = ref(false)
+
+// Computed
+const hasSelection = computed(() => selectedDocIds.value.size > 0)
+const allSelected = computed(() =>
+  documents.value.length > 0 && selectedDocIds.value.size === documents.value.length
+)
+const selectedCount = computed(() => selectedDocIds.value.size)
+
+// Selection functions
+function toggleDocSelection(docId: number) {
+  if (selectedDocIds.value.has(docId)) {
+    selectedDocIds.value.delete(docId)
+  } else {
+    selectedDocIds.value.add(docId)
+  }
+  // Trigger reactivity
+  selectedDocIds.value = new Set(selectedDocIds.value)
+}
+
+function toggleSelectAll() {
+  if (allSelected.value) {
+    selectedDocIds.value = new Set()
+  } else {
+    selectedDocIds.value = new Set(documents.value.map(d => d.id))
+  }
+}
+
+function clearSelection() {
+  selectedDocIds.value = new Set()
+}
+
+// Bulk operations
+async function bulkAssign() {
+  if (!selectedTargetProject.value || selectedDocIds.value.size === 0) return
+
+  bulkOperating.value = true
+  try {
+    const result = await documentsApi.bulkAssign(
+      Array.from(selectedDocIds.value),
+      selectedTargetProject.value
+    )
+
+    showBulkMoveModal.value = false
+    selectedTargetProject.value = null
+    clearSelection()
+    await loadData()
+
+    if (result.failed_count > 0) {
+      error.value = `${result.success_count} documents assigned, ${result.failed_count} failed`
+    }
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Failed to assign documents'
+  } finally {
+    bulkOperating.value = false
+  }
+}
+
+async function bulkDelete() {
+  if (selectedDocIds.value.size === 0) return
+
+  bulkOperating.value = true
+  try {
+    const result = await documentsApi.bulkDelete(Array.from(selectedDocIds.value))
+
+    showBulkDeleteConfirm.value = false
+    clearSelection()
+    await loadData()
+
+    if (result.failed_count > 0) {
+      error.value = `${result.success_count} documents deleted, ${result.failed_count} failed`
+    }
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Failed to delete documents'
+  } finally {
+    bulkOperating.value = false
+  }
+}
+
+async function openBulkMoveModal() {
+  try {
+    allProjects.value = await projectsApi.list()
+    selectedTargetProject.value = null
+    showBulkMoveModal.value = true
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Failed to load projects'
+  }
+}
 
 // Load unassigned documents
 async function loadData() {
@@ -181,10 +274,76 @@ onMounted(() => {
         </p>
       </div>
 
+      <!-- Bulk Actions Bar -->
+      <div
+        v-if="documents.length > 0"
+        class="flex items-center justify-between mb-4 p-3 bg-white rounded-lg border border-gray-200"
+      >
+        <div class="flex items-center gap-3">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              :checked="allSelected"
+              :indeterminate="hasSelection && !allSelected"
+              class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              @change="toggleSelectAll"
+            />
+            <span class="text-sm text-gray-600">
+              {{ allSelected ? 'Deselect all' : 'Select all' }}
+            </span>
+          </label>
+          <span v-if="hasSelection" class="text-sm text-blue-600 font-medium">
+            {{ selectedCount }} selected
+          </span>
+        </div>
+
+        <div v-if="hasSelection" class="flex items-center gap-2">
+          <button
+            type="button"
+            class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100"
+            @click="openBulkMoveModal"
+          >
+            <ArrowsRightLeftIcon class="h-4 w-4 mr-1" />
+            Assign to Project
+          </button>
+          <button
+            type="button"
+            class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100"
+            @click="showBulkDeleteConfirm = true"
+          >
+            <TrashIcon class="h-4 w-4 mr-1" />
+            Delete
+          </button>
+          <button
+            type="button"
+            class="text-sm text-gray-500 hover:text-gray-700 ml-2"
+            @click="clearSelection"
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+
       <!-- Documents Grid -->
-      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div v-if="documents.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <div v-for="doc in documents" :key="doc.id" class="relative">
-          <DocumentCard :document="doc" />
+          <!-- Selection checkbox -->
+          <div class="absolute top-2 left-2 z-10">
+            <label class="flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                :checked="selectedDocIds.has(doc.id)"
+                class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 bg-white shadow"
+                @change="toggleDocSelection(doc.id)"
+                @click.stop
+              />
+            </label>
+          </div>
+
+          <DocumentCard
+            :document="doc"
+            :class="{ 'ring-2 ring-blue-500': selectedDocIds.has(doc.id) }"
+          />
 
           <!-- Action buttons overlay -->
           <div
@@ -259,7 +418,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- Assign to Project Modal -->
+    <!-- Assign to Project Modal (single) -->
     <div
       v-if="showMoveModal"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
@@ -296,6 +455,80 @@ onMounted(() => {
             @click="moveDocument"
           >
             {{ moving ? 'Assigning...' : 'Assign' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bulk Assign Modal -->
+    <div
+      v-if="showBulkMoveModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+    >
+      <div class="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+        <h3 class="text-lg font-semibold text-gray-900 mb-2">Bulk Assign to Project</h3>
+        <p class="text-gray-600 mb-4">
+          Assign {{ selectedCount }} selected documents to a project:
+        </p>
+
+        <select
+          v-model="selectedTargetProject"
+          class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 mb-4"
+        >
+          <option :value="null" disabled>Select a project...</option>
+          <option v-for="proj in allProjects" :key="proj.id" :value="proj.id">
+            {{ proj.name }}
+          </option>
+        </select>
+
+        <div class="flex justify-end gap-3">
+          <button
+            type="button"
+            class="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+            :disabled="bulkOperating"
+            @click="showBulkMoveModal = false"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="px-4 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            :disabled="selectedTargetProject === null || bulkOperating"
+            @click="bulkAssign"
+          >
+            {{ bulkOperating ? 'Assigning...' : `Assign ${selectedCount} Documents` }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bulk Delete Confirmation Modal -->
+    <div
+      v-if="showBulkDeleteConfirm"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+    >
+      <div class="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+        <h3 class="text-lg font-semibold text-gray-900 mb-2">Delete {{ selectedCount }} Documents?</h3>
+        <p class="text-gray-600 mb-4">
+          Are you sure you want to delete {{ selectedCount }} selected documents? This will
+          remove all processed data and cannot be undone.
+        </p>
+        <div class="flex justify-end gap-3">
+          <button
+            type="button"
+            class="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+            :disabled="bulkOperating"
+            @click="showBulkDeleteConfirm = false"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="px-4 py-2 text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50"
+            :disabled="bulkOperating"
+            @click="bulkDelete"
+          >
+            {{ bulkOperating ? 'Deleting...' : `Delete ${selectedCount} Documents` }}
           </button>
         </div>
       </div>

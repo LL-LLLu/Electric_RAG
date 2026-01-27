@@ -9,11 +9,10 @@ class EmbeddingService:
     """Generate embeddings for semantic search"""
 
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
-        print(f"[EMBEDDING] Loading model: {model_name}...")
+        logger.info(f"Loading embedding model: {model_name}...")
         self.model = SentenceTransformer(model_name)
         self.embedding_dim = 384
-        print(f"[EMBEDDING] Model loaded successfully")
-        logger.info(f"Loaded embedding model: {model_name}")
+        logger.info(f"Embedding model loaded successfully")
 
     def generate_embedding(self, text: str) -> List[float]:
         """Generate embedding for a single text"""

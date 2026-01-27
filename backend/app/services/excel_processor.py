@@ -6,6 +6,8 @@ from typing import List, Dict, Tuple, Optional
 import pandas as pd
 from openpyxl import load_workbook
 
+from app.services.ai_analysis_service import ai_analysis_service
+
 logger = logging.getLogger(__name__)
 
 
@@ -281,6 +283,109 @@ class ExcelProcessor:
                 tags.update(match.upper() for match in matches)
 
         return list(tags)
+
+    def _dataframe_to_text(self, df: pd.DataFrame, max_rows: int = 100) -> str:
+        """Convert DataFrame to text representation for AI analysis"""
+        if df.empty:
+            return ""
+
+        lines = []
+
+        # Header row
+        lines.append(" | ".join(str(col) for col in df.columns))
+        lines.append("-" * 80)
+
+        # Data rows (limit for API context)
+        for idx, row in df.head(max_rows).iterrows():
+            row_values = []
+            for col in df.columns:
+                value = row[col]
+                if pd.isna(value):
+                    row_values.append("")
+                else:
+                    row_values.append(str(value)[:100])  # Truncate long values
+            lines.append(" | ".join(row_values))
+
+        if len(df) > max_rows:
+            lines.append(f"... and {len(df) - max_rows} more rows")
+
+        return "\n".join(lines)
+
+    def analyze_with_ai(self, file_path: str) -> Dict:
+        """Perform AI analysis on Excel file for deeper understanding
+
+        Returns dict with AI-extracted equipment, io_points, alarms, relationships
+        """
+        self._validate_file(file_path)
+        ext = os.path.splitext(file_path)[1].lower()
+        filename = os.path.basename(file_path)
+
+        all_results = {
+            'data_type': 'OTHER',
+            'equipment': [],
+            'io_points': [],
+            'alarms': [],
+            'relationships': [],
+            'schema': {}
+        }
+
+        try:
+            if ext == '.csv':
+                try:
+                    df = pd.read_csv(file_path, encoding='utf-8')
+                except UnicodeDecodeError:
+                    df = pd.read_csv(file_path, encoding='latin-1')
+
+                sheet_text = self._dataframe_to_text(df)
+                if sheet_text:
+                    result = ai_analysis_service.analyze_excel_data(sheet_text, filename, "Sheet1")
+                    self._merge_ai_results(all_results, result)
+
+            elif ext in ['.xlsx', '.xls']:
+                xlsx = pd.ExcelFile(file_path)
+                for sheet_name in xlsx.sheet_names:
+                    try:
+                        df = pd.read_excel(xlsx, sheet_name=sheet_name)
+                        if df.empty:
+                            continue
+
+                        sheet_text = self._dataframe_to_text(df)
+                        if sheet_text:
+                            result = ai_analysis_service.analyze_excel_data(sheet_text, filename, sheet_name)
+                            self._merge_ai_results(all_results, result)
+                    except Exception as e:
+                        logger.warning(f"AI analysis failed for sheet {sheet_name}: {e}")
+                        continue
+
+        except Exception as e:
+            logger.error(f"AI analysis failed for {file_path}: {e}")
+            all_results['error'] = str(e)
+
+        return all_results
+
+    def _merge_ai_results(self, all_results: Dict, new_result: Dict) -> None:
+        """Merge AI analysis results from one sheet into combined results"""
+        if not new_result:
+            return
+
+        # Update data_type if more specific
+        if new_result.get('data_type') and new_result['data_type'] != 'OTHER':
+            all_results['data_type'] = new_result['data_type']
+
+        # Update schema
+        if new_result.get('schema'):
+            all_results['schema'].update(new_result['schema'])
+
+        # Extend lists, avoiding duplicates for equipment
+        existing_tags = {eq.get('tag') for eq in all_results['equipment'] if isinstance(eq, dict)}
+        for eq in new_result.get('equipment', []):
+            if isinstance(eq, dict) and eq.get('tag') not in existing_tags:
+                all_results['equipment'].append(eq)
+                existing_tags.add(eq.get('tag'))
+
+        all_results['io_points'].extend(new_result.get('io_points', []))
+        all_results['alarms'].extend(new_result.get('alarms', []))
+        all_results['relationships'].extend(new_result.get('relationships', []))
 
 
 # Singleton instance

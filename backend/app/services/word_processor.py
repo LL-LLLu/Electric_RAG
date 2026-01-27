@@ -6,6 +6,8 @@ from typing import List, Dict, Tuple, Optional
 from docx import Document
 from docx.oxml.ns import qn
 
+from app.services.ai_analysis_service import ai_analysis_service
+
 logger = logging.getLogger(__name__)
 
 
@@ -154,6 +156,10 @@ class WordProcessor:
         content = section['content']
         heading_path = section['heading_path']
 
+        # Truncate heading_path to fit database column (VARCHAR 200)
+        if heading_path and len(heading_path) > 195:
+            heading_path = heading_path[:192] + '...'
+
         if not content:
             return chunks
 
@@ -272,6 +278,78 @@ class WordProcessor:
         # Normalize and deduplicate
         tags = list(set(match.upper().replace(' ', '-').replace('_', '-') for match in matches))
         return sorted(tags)
+
+    def analyze_with_ai(self, file_path: str) -> Dict:
+        """Perform AI analysis on Word document for deeper understanding
+
+        Returns dict with AI-extracted equipment, sequences, control_logic, alarms, setpoints
+        """
+        self._validate_file(file_path)
+        filename = os.path.basename(file_path)
+
+        all_results = {
+            'document_type': 'OTHER',
+            'equipment': [],
+            'sequences': [],
+            'control_logic': [],
+            'interlocks': [],
+            'alarms': [],
+            'setpoints': []
+        }
+
+        try:
+            doc = Document(file_path)
+        except Exception as e:
+            logger.error(f"Failed to open Word document for AI analysis {file_path}: {e}")
+            all_results['error'] = str(e)
+            return all_results
+
+        # Extract sections
+        sections = self._extract_sections(doc)
+
+        if not sections:
+            logger.warning(f"No sections found for AI analysis in {file_path}")
+            return all_results
+
+        # Analyze each section with AI
+        for section in sections:
+            content = section.get('content', '')
+            heading = section.get('heading_path', '') or section.get('heading', '')
+
+            if not content or len(content.strip()) < 50:
+                continue
+
+            try:
+                result = ai_analysis_service.analyze_word_content(content, filename, heading)
+                self._merge_ai_results(all_results, result)
+            except Exception as e:
+                logger.warning(f"AI analysis failed for section '{heading}': {e}")
+                continue
+
+        return all_results
+
+    def _merge_ai_results(self, all_results: Dict, new_result: Dict) -> None:
+        """Merge AI analysis results from one section into combined results"""
+        if not new_result:
+            return
+
+        # Update document_type if more specific
+        if new_result.get('document_type') and new_result['document_type'] != 'OTHER':
+            all_results['document_type'] = new_result['document_type']
+
+        # Extend equipment list, avoiding duplicates
+        existing_tags = {eq.get('tag') for eq in all_results['equipment'] if isinstance(eq, dict)}
+        for eq in new_result.get('equipment', []):
+            if isinstance(eq, dict) and eq.get('tag') not in existing_tags:
+                all_results['equipment'].append(eq)
+                existing_tags.add(eq.get('tag'))
+
+        # Extend other lists
+        all_results['sequences'].extend(new_result.get('sequences', []))
+        all_results['control_logic'].extend(new_result.get('control_logic', []))
+        all_results['interlocks'].extend(new_result.get('interlocks', []))
+        all_results['alarms'].extend(new_result.get('alarms', []))
+        all_results['setpoints'].extend(new_result.get('setpoints', []))
 
 
 # Singleton instance

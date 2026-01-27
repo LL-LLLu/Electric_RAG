@@ -41,8 +41,12 @@ class SupplementaryProcessor:
             file_path = document.file_path
             if document.document_type == 'EXCEL':
                 structured_data, chunks = excel_processor.parse_file(file_path)
+                # Perform AI analysis for deeper understanding
+                ai_results = excel_processor.analyze_with_ai(file_path)
             elif document.document_type == 'WORD':
                 structured_data, chunks = word_processor.parse_file(file_path)
+                # Perform AI analysis for deeper understanding
+                ai_results = word_processor.analyze_with_ai(file_path)
             else:
                 raise ValueError(f"Unknown document type: {document.document_type}")
 
@@ -53,6 +57,12 @@ class SupplementaryProcessor:
                 chunks = []
 
             logger.info(f"Extracted {len(structured_data)} data entries and {len(chunks)} chunks")
+
+            # Merge AI-extracted equipment into structured data
+            ai_structured_data = self._convert_ai_results_to_structured_data(ai_results, document)
+            if ai_structured_data:
+                logger.info(f"AI extracted {len(ai_structured_data)} additional data entries")
+                structured_data.extend(ai_structured_data)
 
             # Get equipment list for this project for fuzzy matching
             equipment_list = db.query(Equipment).filter(
@@ -66,6 +76,10 @@ class SupplementaryProcessor:
             # Store and embed chunks
             for chunk in chunks:
                 self._store_chunk(db, document, chunk)
+
+            # Store AI analysis summary if available
+            if ai_results and not ai_results.get('error'):
+                document.ai_analysis = json.dumps(ai_results, default=str)
 
             # Update document status
             document.processed = 2  # Done
@@ -84,6 +98,202 @@ class SupplementaryProcessor:
             document.processing_error = str(e)
             db.commit()
             return False
+
+    def _convert_ai_results_to_structured_data(self, ai_results: dict, document: SupplementaryDocument) -> list:
+        """Convert AI analysis results to structured data entries
+
+        Args:
+            ai_results: Dict from AI analysis
+            document: Parent document
+
+        Returns:
+            List of structured data dicts ready for storage
+        """
+        structured_data = []
+
+        if not ai_results or ai_results.get('error'):
+            return structured_data
+
+        # Process equipment from AI
+        for eq in ai_results.get('equipment', []):
+            if not isinstance(eq, dict):
+                continue
+            tag = eq.get('tag', '')
+            if not tag:
+                continue
+
+            data_json = {
+                'type': eq.get('type', ''),
+                'description': eq.get('description', ''),
+                'function': eq.get('function', ''),
+                'specs': eq.get('specs', {})
+            }
+            # Remove empty values
+            data_json = {k: v for k, v in data_json.items() if v}
+
+            structured_data.append({
+                'equipment_tag': tag,
+                'data_type': 'SPECIFICATION',
+                'data_json': json.dumps(data_json, default=str),
+                'source_location': f"AI:{document.original_filename}"
+            })
+
+        # Process IO points from AI (Excel)
+        for io in ai_results.get('io_points', []):
+            if not isinstance(io, dict):
+                continue
+            tag = io.get('tag', '')
+            if not tag:
+                continue
+
+            data_json = {
+                'point_name': io.get('point_name', ''),
+                'io_type': io.get('io_type', ''),
+                'description': io.get('description', ''),
+                'range': io.get('range', '')
+            }
+            data_json = {k: v for k, v in data_json.items() if v}
+
+            structured_data.append({
+                'equipment_tag': tag,
+                'data_type': 'IO_POINT',
+                'data_json': json.dumps(data_json, default=str),
+                'source_location': f"AI:{document.original_filename}"
+            })
+
+        # Process alarms from AI
+        for alarm in ai_results.get('alarms', []):
+            if not isinstance(alarm, dict):
+                continue
+            tag = alarm.get('tag', '') or alarm.get('equipment_tag', '')
+            if not tag:
+                continue
+
+            data_json = {
+                'alarm_name': alarm.get('alarm_name', '') or alarm.get('alarm', ''),
+                'category': alarm.get('category', ''),
+                'setpoint': alarm.get('setpoint', ''),
+                'description': alarm.get('description', ''),
+                'action': alarm.get('action', '')
+            }
+            data_json = {k: v for k, v in data_json.items() if v}
+
+            structured_data.append({
+                'equipment_tag': tag,
+                'data_type': 'ALARM',
+                'data_json': json.dumps(data_json, default=str),
+                'source_location': f"AI:{document.original_filename}"
+            })
+
+        # Process sequences from AI (Word docs)
+        for seq in ai_results.get('sequences', []):
+            if not isinstance(seq, dict):
+                continue
+            tag = seq.get('equipment_tag', '')
+            if not tag:
+                continue
+
+            data_json = {
+                'mode': seq.get('mode', ''),
+                'steps': seq.get('steps', [])
+            }
+            data_json = {k: v for k, v in data_json.items() if v}
+
+            structured_data.append({
+                'equipment_tag': tag,
+                'data_type': 'SEQUENCE',
+                'data_json': json.dumps(data_json, default=str),
+                'source_location': f"AI:{document.original_filename}"
+            })
+
+        # Process control logic from AI (Word docs)
+        for ctrl in ai_results.get('control_logic', []):
+            if not isinstance(ctrl, dict):
+                continue
+            tag = ctrl.get('equipment_tag', '')
+            if not tag:
+                continue
+
+            data_json = {
+                'control_type': ctrl.get('control_type', ''),
+                'controlled_variable': ctrl.get('controlled_variable', ''),
+                'setpoint': ctrl.get('setpoint', ''),
+                'output': ctrl.get('output', '')
+            }
+            data_json = {k: v for k, v in data_json.items() if v}
+
+            structured_data.append({
+                'equipment_tag': tag,
+                'data_type': 'SPECIFICATION',
+                'data_json': json.dumps(data_json, default=str),
+                'source_location': f"AI:{document.original_filename}"
+            })
+
+        # Process interlocks from AI
+        for intlk in ai_results.get('interlocks', []):
+            if not isinstance(intlk, dict):
+                continue
+            tag = intlk.get('equipment_tag', '')
+            if not tag:
+                continue
+
+            data_json = {
+                'condition': intlk.get('condition', ''),
+                'action': intlk.get('action', '')
+            }
+            data_json = {k: v for k, v in data_json.items() if v}
+
+            structured_data.append({
+                'equipment_tag': tag,
+                'data_type': 'SPECIFICATION',
+                'data_json': json.dumps(data_json, default=str),
+                'source_location': f"AI:{document.original_filename}"
+            })
+
+        # Process setpoints from AI (Word docs)
+        for sp in ai_results.get('setpoints', []):
+            if not isinstance(sp, dict):
+                continue
+            tag = sp.get('equipment_tag', '')
+            if not tag:
+                continue
+
+            data_json = {
+                'parameter': sp.get('parameter', ''),
+                'value': sp.get('value', ''),
+                'mode': sp.get('mode', '')
+            }
+            data_json = {k: v for k, v in data_json.items() if v}
+
+            structured_data.append({
+                'equipment_tag': tag,
+                'data_type': 'SPECIFICATION',
+                'data_json': json.dumps(data_json, default=str),
+                'source_location': f"AI:{document.original_filename}"
+            })
+
+        # Process relationships from AI (Excel)
+        for rel in ai_results.get('relationships', []):
+            if not isinstance(rel, dict):
+                continue
+            source = rel.get('source', '')
+            target = rel.get('target', '')
+            if not source or not target:
+                continue
+
+            # Store for source equipment
+            data_json = {
+                'relationship': rel.get('relationship', 'CONNECTED'),
+                'connected_to': target
+            }
+            structured_data.append({
+                'equipment_tag': source,
+                'data_type': 'SPECIFICATION',
+                'data_json': json.dumps(data_json, default=str),
+                'source_location': f"AI:{document.original_filename}"
+            })
+
+        return structured_data
 
     def _store_equipment_data(self, db: Session, document: SupplementaryDocument,
                               data: dict, equipment_list: list) -> EquipmentData:

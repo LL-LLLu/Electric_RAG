@@ -280,6 +280,7 @@ class SupplementaryDocument(Base):
     file_size = Column(Integer)
     processed = Column(Integer, default=0)  # 0=pending, 1=processing, 2=done, -1=error
     processing_error = Column(Text)
+    ai_analysis = Column(Text)  # JSON storing AI analysis results
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships

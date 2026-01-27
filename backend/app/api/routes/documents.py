@@ -292,6 +292,174 @@ async def assign_document_to_project(
     return document
 
 
+# Bulk operation schemas
+from pydantic import BaseModel
+from typing import List as PyList
+
+class BulkAssignRequest(BaseModel):
+    document_ids: PyList[int]
+    project_id: int | None  # None to unassign
+
+
+class BulkDeleteRequest(BaseModel):
+    document_ids: PyList[int]
+
+
+class BulkOperationResponse(BaseModel):
+    success_count: int
+    failed_count: int
+    failed_ids: PyList[int]
+    message: str
+
+
+@router.post("/bulk/assign", response_model=BulkOperationResponse)
+async def bulk_assign_documents(
+    data: BulkAssignRequest,
+    db: Session = Depends(get_db)
+):
+    """Assign multiple documents to a project at once"""
+    if not data.document_ids:
+        raise HTTPException(status_code=400, detail="No document IDs provided")
+
+    # Verify project exists if assigning
+    if data.project_id is not None:
+        project = db.query(Project).filter(Project.id == data.project_id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+    success_count = 0
+    failed_ids = []
+
+    for doc_id in data.document_ids:
+        document = db.query(Document).filter(Document.id == doc_id).first()
+        if document:
+            document.project_id = data.project_id
+            # Update equipment as well
+            db.query(Equipment).filter(Equipment.document_id == doc_id).update(
+                {Equipment.project_id: data.project_id}
+            )
+            success_count += 1
+        else:
+            failed_ids.append(doc_id)
+
+    db.commit()
+
+    action = f"assigned to project {data.project_id}" if data.project_id else "unassigned from project"
+    return BulkOperationResponse(
+        success_count=success_count,
+        failed_count=len(failed_ids),
+        failed_ids=failed_ids,
+        message=f"{success_count} documents {action}"
+    )
+
+
+@router.post("/bulk/delete", response_model=BulkOperationResponse)
+async def bulk_delete_documents(
+    data: BulkDeleteRequest,
+    db: Session = Depends(get_db)
+):
+    """Delete multiple documents at once"""
+    from app.models.database import EquipmentLocation, EquipmentRelationship
+
+    if not data.document_ids:
+        raise HTTPException(status_code=400, detail="No document IDs provided")
+
+    success_count = 0
+    failed_ids = []
+
+    for doc_id in data.document_ids:
+        document = db.query(Document).filter(Document.id == doc_id).first()
+        if not document:
+            failed_ids.append(doc_id)
+            continue
+
+        try:
+            # Delete relationships first
+            db.query(EquipmentRelationship).filter(
+                EquipmentRelationship.document_id == doc_id
+            ).delete()
+
+            # Delete equipment locations for pages in this document
+            page_ids = [p.id for p in document.pages]
+            if page_ids:
+                db.query(EquipmentLocation).filter(
+                    EquipmentLocation.page_id.in_(page_ids)
+                ).delete(synchronize_session=False)
+
+            # Delete equipment that belongs only to this document
+            db.query(Equipment).filter(Equipment.document_id == doc_id).delete()
+
+            # Delete pages
+            db.query(Page).filter(Page.document_id == doc_id).delete()
+
+            # Delete files
+            if os.path.exists(document.file_path):
+                os.remove(document.file_path)
+
+            doc_dir = os.path.join(settings.upload_dir, f"doc_{doc_id}")
+            if os.path.exists(doc_dir):
+                shutil.rmtree(doc_dir)
+
+            # Delete the document
+            db.delete(document)
+            success_count += 1
+
+        except Exception as e:
+            failed_ids.append(doc_id)
+
+    db.commit()
+
+    return BulkOperationResponse(
+        success_count=success_count,
+        failed_count=len(failed_ids),
+        failed_ids=failed_ids,
+        message=f"{success_count} documents deleted successfully"
+    )
+
+
+@router.post("/bulk/reprocess", response_model=BulkOperationResponse)
+async def bulk_reprocess_documents(
+    data: BulkDeleteRequest,  # Reuse schema, just needs document_ids
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """Reprocess multiple documents at once"""
+    if not data.document_ids:
+        raise HTTPException(status_code=400, detail="No document IDs provided")
+
+    success_count = 0
+    failed_ids = []
+
+    for doc_id in data.document_ids:
+        document = db.query(Document).filter(Document.id == doc_id).first()
+        if not document:
+            failed_ids.append(doc_id)
+            continue
+
+        # Reset processing state
+        document.processed = 0
+        document.pages_processed = 0
+        document.processing_error = None
+        document.page_count = None
+
+        # Clear existing pages and related data
+        db.query(Page).filter(Page.document_id == doc_id).delete()
+        db.query(Equipment).filter(Equipment.document_id == doc_id).delete()
+
+        # Queue for processing
+        background_tasks.add_task(process_document_task, doc_id)
+        success_count += 1
+
+    db.commit()
+
+    return BulkOperationResponse(
+        success_count=success_count,
+        failed_count=len(failed_ids),
+        failed_ids=failed_ids,
+        message=f"{success_count} documents queued for reprocessing"
+    )
+
+
 @router.post("/{document_id}/retry")
 async def retry_processing(
     document_id: int,
@@ -318,6 +486,149 @@ async def retry_processing(
     background_tasks.add_task(process_document_task, document.id)
 
     return {"message": f"Processing restarted for document {document_id}"}
+
+
+@router.get("/status/stuck", response_model=List[DocumentResponse])
+async def list_stuck_documents(
+    db: Session = Depends(get_db),
+    include_failed: bool = Query(default=True, description="Include failed documents (processed=-1)"),
+    stuck_threshold_minutes: int = Query(default=30, description="Minutes after which processing is considered stuck")
+):
+    """List documents stuck in processing or failed state.
+
+    A document is considered stuck if:
+    - It has processed=1 (processing) for longer than stuck_threshold_minutes
+    - Or it has processed=-1 (failed) if include_failed is True
+    """
+    from datetime import datetime, timedelta
+
+    stuck_threshold = datetime.utcnow() - timedelta(minutes=stuck_threshold_minutes)
+
+    query = db.query(Document)
+
+    if include_failed:
+        # Stuck (processing too long) OR failed
+        documents = query.filter(
+            ((Document.processed == 1) & (Document.upload_date < stuck_threshold)) |
+            (Document.processed == -1)
+        ).all()
+    else:
+        # Only stuck (processing too long)
+        documents = query.filter(
+            (Document.processed == 1) & (Document.upload_date < stuck_threshold)
+        ).all()
+
+    return documents
+
+
+@router.post("/status/recover-all")
+async def recover_all_stuck_documents(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    include_failed: bool = Query(default=True, description="Include failed documents"),
+    stuck_threshold_minutes: int = Query(default=30, description="Minutes threshold for stuck detection")
+):
+    """Recover all stuck and optionally failed documents by resetting and reprocessing them.
+
+    This endpoint:
+    1. Finds all documents stuck in processing or failed state
+    2. Resets their state to pending
+    3. Clears partial processing data
+    4. Restarts processing for each
+
+    Returns the count and IDs of documents being recovered.
+    """
+    from datetime import datetime, timedelta
+
+    stuck_threshold = datetime.utcnow() - timedelta(minutes=stuck_threshold_minutes)
+
+    query = db.query(Document)
+
+    if include_failed:
+        documents = query.filter(
+            ((Document.processed == 1) & (Document.upload_date < stuck_threshold)) |
+            (Document.processed == -1)
+        ).all()
+    else:
+        documents = query.filter(
+            (Document.processed == 1) & (Document.upload_date < stuck_threshold)
+        ).all()
+
+    if not documents:
+        return {
+            "message": "No stuck or failed documents found",
+            "recovered_count": 0,
+            "document_ids": []
+        }
+
+    recovered_ids = []
+
+    for document in documents:
+        # Reset processing state
+        document.processed = 0
+        document.pages_processed = 0
+        document.processing_error = None
+        document.page_count = None
+
+        # Clear existing pages and related data
+        db.query(Page).filter(Page.document_id == document.id).delete()
+        db.query(Equipment).filter(Equipment.document_id == document.id).delete()
+
+        recovered_ids.append(document.id)
+
+    db.commit()
+
+    # Start processing for all recovered documents
+    for doc_id in recovered_ids:
+        background_tasks.add_task(process_document_task, doc_id)
+
+    return {
+        "message": f"Recovery initiated for {len(recovered_ids)} documents",
+        "recovered_count": len(recovered_ids),
+        "document_ids": recovered_ids
+    }
+
+
+@router.get("/status/summary")
+async def get_processing_status_summary(db: Session = Depends(get_db)):
+    """Get a summary of document processing status.
+
+    Returns counts by processing state:
+    - pending (0): Waiting to be processed
+    - processing (1): Currently being processed
+    - completed (2): Successfully processed
+    - failed (-1): Processing failed
+    """
+    from sqlalchemy import func
+
+    status_counts = db.query(
+        Document.processed,
+        func.count(Document.id)
+    ).group_by(Document.processed).all()
+
+    # Map to readable names
+    status_map = {
+        0: "pending",
+        1: "processing",
+        2: "completed",
+        -1: "failed"
+    }
+
+    summary = {
+        "pending": 0,
+        "processing": 0,
+        "completed": 0,
+        "failed": 0,
+        "total": 0
+    }
+
+    for status, count in status_counts:
+        status_name = status_map.get(status, f"unknown_{status}")
+        if status_name in summary:
+            summary[status_name] = count
+        summary["total"] += count
+
+    return summary
 
 
 @router.get("/{document_id}/page/{page_number}/image")

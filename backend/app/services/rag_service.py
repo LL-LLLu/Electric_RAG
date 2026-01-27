@@ -4,12 +4,18 @@ from typing import List
 from sqlalchemy.orm import Session
 import anthropic
 import google.generativeai as genai
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from app.models.schemas import RAGResponse, SearchResult, QueryType
 from app.services.search_service import search_service
 from app.services.graph_service import graph_service
 
 logger = logging.getLogger(__name__)
+
+# Retry configuration for LLM API calls
+LLM_RETRY_ATTEMPTS = 3
+LLM_RETRY_MIN_WAIT = 1  # seconds
+LLM_RETRY_MAX_WAIT = 10  # seconds
 
 
 class RAGService:
@@ -40,42 +46,40 @@ class RAGService:
         """Check if any LLM client is available"""
         return self.anthropic_client is not None or self.gemini_model is not None
 
-    def query(self, db: Session, query: str, project_id: int = None, limit: int = 20) -> dict:
+    def query(self, db: Session, query: str, project_id: int = None, limit: int = 25) -> dict:
         """Query with project scope and return dict format for conversations API
 
         Args:
             db: Database session
             query: Search query
             project_id: Optional project ID to scope search
-            limit: Maximum sources to return (default 20 for better cross-document coverage)
+            limit: Maximum sources to return (default 25 - balanced for quality + comprehensiveness)
 
         Returns:
             dict with 'answer' and 'sources' keys
         """
         import time
 
-        print(f"\n{'='*60}")
-        print(f"[RAG Query] Processing: {query}")
+        logger.info(f"RAG Query processing: {query[:100]}...")
         if project_id:
-            print(f"[RAG Query] Scoped to project: {project_id}")
-        print(f"{'='*60}")
+            logger.debug(f"Scoped to project: {project_id}")
 
         # Extract equipment tags from query for graph-based context
         equipment_tags = graph_service.extract_equipment_from_query(query, db)
-        print(f"[RAG Query] Detected equipment tags: {equipment_tags}")
+        logger.debug(f"Detected equipment tags: {equipment_tags}")
 
         # Build graph context if equipment tags found
         graph_context = ""
         if equipment_tags:
-            print(f"[RAG Query] Building graph context for: {equipment_tags}")
+            logger.debug(f"Building graph context for: {equipment_tags}")
             graph_context = graph_service.build_graph_context(db, equipment_tags, query)
             if graph_context:
-                print(f"[RAG Query] Graph context built: {len(graph_context)} chars")
+                logger.debug(f"Graph context built: {len(graph_context)} chars")
 
         # Search with project scope - use max_per_document=2 for better cross-document diversity
         search_start = time.time()
         search_response = search_service.search(db, query, limit=limit, project_id=project_id, max_per_document=2)
-        print(f"[RAG Query] Found {len(search_response.results)} results in {time.time()-search_start:.2f}s")
+        logger.info(f"Found {len(search_response.results)} results in {time.time()-search_start:.2f}s")
 
         # Build context with graph data
         context = self._build_context(search_response.results, {"graph_context": graph_context})
@@ -112,28 +116,26 @@ class RAGService:
         """Generate an answer using search results and LLM"""
         import time
 
-        print(f"\n{'='*60}")
-        print(f"[RAG] Processing query: {query}")
-        print(f"{'='*60}")
+        logger.info(f"RAG processing query: {query[:100]}...")
 
         # Extract equipment tags for graph-based context
         equipment_tags = graph_service.extract_equipment_from_query(query, db)
-        print(f"[RAG] Detected equipment tags: {equipment_tags}")
+        logger.debug(f"Detected equipment tags: {equipment_tags}")
 
         # Build graph context
         graph_context = ""
         if equipment_tags:
-            print(f"[RAG] Building graph context...")
+            logger.debug("Building graph context...")
             graph_context = graph_service.build_graph_context(db, equipment_tags, query)
             if graph_context:
-                print(f"[RAG] Graph context: {len(graph_context)} chars")
+                logger.debug(f"Graph context: {len(graph_context)} chars")
 
         # Search with higher limit for better cross-document coverage
-        print(f"[RAG] Step 1: Searching documents...")
+        logger.debug("Step 1: Searching documents...")
         search_start = time.time()
         search_response = search_service.search(db, query, limit=20, max_per_document=2)
-        print(f"[RAG] Found {len(search_response.results)} results in {time.time()-search_start:.2f}s")
-        print(f"[RAG] Query type: {search_response.query_type}")
+        logger.info(f"Found {len(search_response.results)} results in {time.time()-search_start:.2f}s")
+        logger.debug(f"Query type: {search_response.query_type}")
 
         # Get additional context
         additional_context = self._get_additional_context(db, query, search_response.query_type)
@@ -141,21 +143,20 @@ class RAGService:
 
         # Build context
         context = self._build_context(search_response.results, additional_context)
-        print(f"[RAG] Context built: {len(context)} chars")
+        logger.debug(f"Context built: {len(context)} chars")
 
         # Generate answer
-        print(f"[RAG] Step 2: Generating answer with {self.provider}...")
+        logger.debug(f"Step 2: Generating answer with {self.provider}...")
         if self._has_llm():
             if self.provider == "gemini":
                 answer = self._call_gemini(query, context, search_response.query_type)
             else:
                 answer = self._call_claude(query, context, search_response.query_type)
         else:
-            print(f"[RAG] No LLM available, using fallback")
+            logger.warning("No LLM available, using fallback")
             answer = self._generate_fallback_answer(query, search_response.results, additional_context)
 
-        print(f"[RAG] Answer generated successfully")
-        print(f"{'='*60}\n")
+        logger.info("Answer generated successfully")
 
         return RAGResponse(
             query=query,
@@ -265,36 +266,52 @@ Question: {query}
 
 Provide a clear, technical answer with document references."""
 
+    @retry(
+        stop=stop_after_attempt(LLM_RETRY_ATTEMPTS),
+        wait=wait_exponential(multiplier=1, min=LLM_RETRY_MIN_WAIT, max=LLM_RETRY_MAX_WAIT),
+        retry=retry_if_exception_type((anthropic.APIConnectionError, anthropic.RateLimitError, anthropic.APIStatusError)),
+        before_sleep=lambda retry_state: logger.warning(f"Claude API call failed, retrying in {retry_state.next_action.sleep} seconds... (attempt {retry_state.attempt_number}/{LLM_RETRY_ATTEMPTS})")
+    )
+    def _call_claude_with_retry(self, system_prompt: str, user_prompt: str) -> str:
+        """Make Claude API call with retry logic"""
+        response = self.anthropic_client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1024,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}]
+        )
+        return response.content[0].text
+
     def _call_claude(self, query: str, context: str, query_type: QueryType) -> str:
         """Call Claude API to generate answer"""
         import time
         system_prompt = self._get_system_prompt()
         user_prompt = self._get_user_prompt(query, context)
 
-        print(f"\n[LLM] Calling Claude API...")
-        print(f"[LLM] Query: {query[:100]}...")
-        print(f"[LLM] Context length: {len(context)} chars")
+        logger.info(f"Calling Claude API for query: {query[:100]}...")
+        logger.debug(f"Context length: {len(context)} chars")
 
         try:
             start_time = time.time()
-            response = self.anthropic_client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=1024,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}]
-            )
+            answer = self._call_claude_with_retry(system_prompt, user_prompt)
             elapsed = time.time() - start_time
-            answer = response.content[0].text
 
-            print(f"[LLM] Claude response received in {elapsed:.2f}s")
-            print(f"[LLM] Response length: {len(answer)} chars")
-            print(f"[LLM] Response preview: {answer[:200]}...")
-
+            logger.info(f"Claude response received in {elapsed:.2f}s ({len(answer)} chars)")
             return answer
         except Exception as e:
-            print(f"[LLM] Claude API ERROR: {e}")
-            logger.error(f"Claude API error: {e}")
+            logger.error(f"Claude API error after {LLM_RETRY_ATTEMPTS} retries: {e}")
             return self._generate_fallback_answer(query, [], {})
+
+    @retry(
+        stop=stop_after_attempt(LLM_RETRY_ATTEMPTS),
+        wait=wait_exponential(multiplier=1, min=LLM_RETRY_MIN_WAIT, max=LLM_RETRY_MAX_WAIT),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError, Exception)),
+        before_sleep=lambda retry_state: logger.warning(f"Gemini API call failed, retrying in {retry_state.next_action.sleep} seconds... (attempt {retry_state.attempt_number}/{LLM_RETRY_ATTEMPTS})")
+    )
+    def _call_gemini_with_retry(self, prompt: str) -> str:
+        """Make Gemini API call with retry logic"""
+        response = self.gemini_model.generate_content(prompt)
+        return response.text
 
     def _call_gemini(self, query: str, context: str, query_type: QueryType) -> str:
         """Call Gemini API to generate answer"""
@@ -302,26 +319,18 @@ Provide a clear, technical answer with document references."""
         system_prompt = self._get_system_prompt()
         user_prompt = self._get_user_prompt(query, context)
 
-        print(f"\n[LLM] Calling Gemini API...")
-        print(f"[LLM] Query: {query[:100]}...")
-        print(f"[LLM] Context length: {len(context)} chars")
+        logger.info(f"Calling Gemini API for query: {query[:100]}...")
+        logger.debug(f"Context length: {len(context)} chars")
 
         try:
             start_time = time.time()
-            response = self.gemini_model.generate_content(
-                f"{system_prompt}\n\n{user_prompt}"
-            )
+            answer = self._call_gemini_with_retry(f"{system_prompt}\n\n{user_prompt}")
             elapsed = time.time() - start_time
-            answer = response.text
 
-            print(f"[LLM] Gemini response received in {elapsed:.2f}s")
-            print(f"[LLM] Response length: {len(answer)} chars")
-            print(f"[LLM] Response preview: {answer[:200]}...")
-
+            logger.info(f"Gemini response received in {elapsed:.2f}s ({len(answer)} chars)")
             return answer
         except Exception as e:
-            print(f"[LLM] Gemini API ERROR: {e}")
-            logger.error(f"Gemini API error: {e}")
+            logger.error(f"Gemini API error after {LLM_RETRY_ATTEMPTS} retries: {e}")
             return self._generate_fallback_answer(query, [], {})
 
     def _generate_fallback_answer(self, query: str, results: List[SearchResult], additional_context: dict) -> str:

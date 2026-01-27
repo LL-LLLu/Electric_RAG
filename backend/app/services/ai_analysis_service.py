@@ -202,6 +202,151 @@ Respond in JSON format:
 }
 """
 
+# ============================================================================
+# SUPPLEMENTARY DOCUMENT ANALYSIS PROMPTS
+# ============================================================================
+
+EXCEL_ANALYSIS_PROMPT = """You are an expert at analyzing electrical/mechanical engineering spreadsheets.
+
+Analyze this spreadsheet data and extract structured information.
+
+IDENTIFY:
+1. SCHEMA: What columns represent what data (equipment tag, description, specs, etc.)
+2. DATA TYPE: Is this an IO List, Equipment Schedule, Alarm List, Panel Schedule, etc.?
+3. EQUIPMENT: All equipment tags/identifiers found
+4. SPECIFICATIONS: HP, voltage, amperage, manufacturer, model numbers
+5. IO POINTS: Point names, types (AI/AO/DI/DO), descriptions, ranges
+6. ALARMS: Alarm names, setpoints, categories (critical/warning/info)
+7. RELATIONSHIPS: What equipment relates to what (fed from, controls, etc.)
+
+For the schema, identify which column contains what:
+- equipment_tag_column: The column with equipment identifiers
+- description_column: Equipment descriptions
+- type_column: Equipment type/category
+- spec_columns: Columns with specifications
+
+Respond in JSON format:
+{
+    "data_type": "IO_LIST or EQUIPMENT_SCHEDULE or ALARM_LIST or PANEL_SCHEDULE or OTHER",
+    "schema": {
+        "equipment_tag_column": "column name or null",
+        "description_column": "column name or null",
+        "type_column": "column name or null",
+        "spec_columns": ["column names with specs"]
+    },
+    "equipment": [
+        {
+            "tag": "VFD-101",
+            "type": "VFD",
+            "description": "Supply Fan VFD",
+            "specs": {"hp": "10", "voltage": "480V"}
+        }
+    ],
+    "io_points": [
+        {
+            "tag": "VFD-101",
+            "point_name": "Speed_Cmd",
+            "io_type": "AO",
+            "description": "Speed command 0-100%",
+            "range": "0-10V"
+        }
+    ],
+    "alarms": [
+        {
+            "tag": "VFD-101",
+            "alarm_name": "Drive Fault",
+            "category": "CRITICAL",
+            "setpoint": null,
+            "description": "VFD fault alarm"
+        }
+    ],
+    "relationships": [
+        {
+            "source": "MCC-1",
+            "target": "VFD-101",
+            "relationship": "FEEDS"
+        }
+    ]
+}
+"""
+
+WORD_ANALYSIS_PROMPT = """You are an expert at analyzing electrical/mechanical engineering documents.
+
+Analyze this document section and extract structured information about equipment and operations.
+
+IDENTIFY:
+1. EQUIPMENT MENTIONED: All equipment tags and identifiers
+2. SEQUENCES OF OPERATION: Step-by-step operational descriptions
+3. CONTROL LOGIC: How equipment is controlled, interlocks, permissives
+4. SETPOINTS: Temperature, pressure, flow setpoints
+5. ALARMS: Alarm conditions and responses
+6. MODES OF OPERATION: Occupied, unoccupied, standby, emergency modes
+7. RELATIONSHIPS: What controls what, what enables what
+
+For each piece of equipment mentioned, extract:
+- What it does
+- How it's controlled
+- What interlocks/safeties apply
+- What alarms it generates
+
+Respond in JSON format:
+{
+    "document_type": "SEQUENCE_OF_OPERATION or COMMISSIONING or SUBMITTAL or SPECIFICATION or OTHER",
+    "equipment": [
+        {
+            "tag": "RTU-1",
+            "type": "Rooftop Unit",
+            "description": "Main office RTU",
+            "function": "Provides heating and cooling to office area"
+        }
+    ],
+    "sequences": [
+        {
+            "equipment_tag": "RTU-1",
+            "mode": "COOLING",
+            "steps": [
+                "On call for cooling, enable supply fan",
+                "Open outdoor air damper to minimum position",
+                "Stage compressors based on discharge air temperature"
+            ]
+        }
+    ],
+    "control_logic": [
+        {
+            "equipment_tag": "RTU-1",
+            "control_type": "PID",
+            "controlled_variable": "Discharge Air Temperature",
+            "setpoint": "55°F",
+            "output": "Compressor staging"
+        }
+    ],
+    "interlocks": [
+        {
+            "equipment_tag": "RTU-1",
+            "condition": "Freezestat trip",
+            "action": "Stop unit, close OA damper, energize heat"
+        }
+    ],
+    "alarms": [
+        {
+            "equipment_tag": "RTU-1",
+            "alarm": "High Discharge Air Temperature",
+            "setpoint": "85°F",
+            "category": "WARNING",
+            "action": "Notify operator"
+        }
+    ],
+    "setpoints": [
+        {
+            "equipment_tag": "RTU-1",
+            "parameter": "Cooling Setpoint",
+            "value": "72°F",
+            "mode": "OCCUPIED"
+        }
+    ]
+}
+"""
+
 
 class AIAnalysisService:
     """AI-powered page analysis with specialized agents for comprehensive extraction"""
@@ -378,18 +523,18 @@ Classify this page. Respond with JSON only."""
         Runs agents in parallel for efficiency, then combines results.
         """
         if not self._has_llm():
-            print(f"[AI] No LLM available, skipping AI analysis for page {page_number}")
+            logger.debug(f"[AI] No LLM available, skipping AI analysis for page {page_number}")
             return {"analysis": "", "equipment": [], "relationships": []}
 
         if not page_text or len(page_text.strip()) < 50:
-            print(f"[AI] Page {page_number} has insufficient text, skipping analysis")
+            logger.debug(f"[AI] Page {page_number} has insufficient text, skipping analysis")
             return {"analysis": "Page has minimal text content", "equipment": [], "relationships": []}
 
         # Truncate very long text
         text_to_analyze = page_text[:12000] if len(page_text) > 12000 else page_text
 
         start_time = time.time()
-        print(f"[AI] Page {page_number}: Starting multi-agent analysis (parallel)...")
+        logger.debug(f"[AI] Page {page_number}: Starting multi-agent analysis (parallel)...")
 
         # Run all agents in parallel using ThreadPoolExecutor
         equipment_result = {}
@@ -416,19 +561,19 @@ Classify this page. Respond with JSON only."""
                         result = future.result()
                         if agent_name == "equipment":
                             equipment_result = result
-                            print(f"[AI] Page {page_number}: Equipment Agent completed")
+                            logger.debug(f"[AI] Page {page_number}: Equipment Agent completed")
                         elif agent_name == "electrical":
                             electrical_result = result
-                            print(f"[AI] Page {page_number}: Electrical Agent completed")
+                            logger.debug(f"[AI] Page {page_number}: Electrical Agent completed")
                         elif agent_name == "control":
                             control_result = result
-                            print(f"[AI] Page {page_number}: Control Agent completed")
+                            logger.debug(f"[AI] Page {page_number}: Control Agent completed")
                         elif agent_name == "mechanical":
                             mechanical_result = result
-                            print(f"[AI] Page {page_number}: Mechanical Agent completed")
+                            logger.debug(f"[AI] Page {page_number}: Mechanical Agent completed")
                         elif agent_name == "classification":
                             classification_result = result
-                            print(f"[AI] Page {page_number}: Classification completed - {result.get('drawing_type', 'GENERAL')}")
+                            logger.debug(f"[AI] Page {page_number}: Classification completed - {result.get('drawing_type', 'GENERAL')}")
                     except Exception as e:
                         logger.error(f"{agent_name} agent error on page {page_number}: {e}")
 
@@ -450,7 +595,7 @@ Classify this page. Respond with JSON only."""
         elapsed = time.time() - start_time
         eq_count = len(combined.get("equipment", []))
         rel_count = len(combined.get("relationships", []))
-        print(f"[AI] Page {page_number} analyzed in {elapsed:.1f}s | {eq_count} equipment | {rel_count} relationships")
+        logger.debug(f"[AI] Page {page_number} analyzed in {elapsed:.1f}s | {eq_count} equipment | {rel_count} relationships")
 
         return combined
 
@@ -727,7 +872,7 @@ Be thorough - extract ALL equipment tags, wire numbers, pipe sizes, control sign
                     relationships.append(f"{trigger} {action}")
 
             elapsed = time.time() - start_time
-            print(f"[AI] Page {page_number} fast-analyzed in {elapsed:.1f}s | {len(equipment_tags)} equipment | {len(relationships)} relationships")
+            logger.debug(f"[AI] Page {page_number} fast-analyzed in {elapsed:.1f}s | {len(equipment_tags)} equipment | {len(relationships)} relationships")
 
             return {
                 "analysis": result.get("summary", ""),
@@ -789,15 +934,147 @@ Provide a 2-3 paragraph summary covering:
 4. Notable control strategies or power distribution schemes"""
 
         try:
-            print(f"[AI] Generating comprehensive document summary...")
+            logger.debug(f"[AI] Generating comprehensive document summary...")
             start_time = time.time()
             summary = self._call_llm(prompt, max_tokens=1024)
             elapsed = time.time() - start_time
-            print(f"[AI] Document summary generated in {elapsed:.1f}s")
+            logger.debug(f"[AI] Document summary generated in {elapsed:.1f}s")
             return summary
         except Exception as e:
             logger.error(f"Document summary error: {e}")
             return ""
+
+    # ========================================================================
+    # SUPPLEMENTARY DOCUMENT ANALYSIS METHODS
+    # ========================================================================
+
+    def analyze_excel_data(self, sheet_data: str, filename: str, sheet_name: str = "") -> Dict:
+        """
+        Analyze Excel spreadsheet data using AI to detect schema and extract structured info.
+
+        Args:
+            sheet_data: String representation of the spreadsheet data (headers + sample rows)
+            filename: Name of the Excel file
+            sheet_name: Name of the sheet being analyzed
+
+        Returns:
+            Dict with data_type, schema, equipment, io_points, alarms, relationships
+        """
+        if not self._has_llm():
+            logger.warning("No LLM available for Excel analysis")
+            return {"data_type": "OTHER", "equipment": [], "io_points": [], "alarms": []}
+
+        if not sheet_data or len(sheet_data.strip()) < 20:
+            return {"data_type": "OTHER", "equipment": [], "io_points": [], "alarms": []}
+
+        # Truncate if too long
+        text_to_analyze = sheet_data[:15000] if len(sheet_data) > 15000 else sheet_data
+
+        prompt = f"""{EXCEL_ANALYSIS_PROMPT}
+
+File: {filename}
+Sheet: {sheet_name or "Sheet1"}
+
+Spreadsheet Data:
+---
+{text_to_analyze}
+---
+
+Analyze this spreadsheet and extract all equipment, IO points, alarms, and relationships. Respond with JSON only."""
+
+        try:
+            start_time = time.time()
+            logger.debug(f"[AI] Analyzing Excel: {filename} / {sheet_name}...")
+
+            response = self._call_llm(prompt, max_tokens=4000)
+            result = self._parse_json_response(response)
+
+            elapsed = time.time() - start_time
+            eq_count = len(result.get("equipment", []))
+            io_count = len(result.get("io_points", []))
+            alarm_count = len(result.get("alarms", []))
+
+            logger.debug(f"[AI] Excel analyzed in {elapsed:.1f}s | {eq_count} equipment | {io_count} IO points | {alarm_count} alarms")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Excel analysis error for {filename}: {e}")
+            return {"data_type": "OTHER", "equipment": [], "io_points": [], "alarms": [], "error": str(e)}
+
+    def analyze_word_content(self, section_text: str, filename: str, section_heading: str = "") -> Dict:
+        """
+        Analyze Word document section using AI to extract equipment info and sequences.
+
+        Args:
+            section_text: Text content of the section
+            filename: Name of the Word file
+            section_heading: Heading of the section being analyzed
+
+        Returns:
+            Dict with document_type, equipment, sequences, control_logic, interlocks, alarms, setpoints
+        """
+        if not self._has_llm():
+            logger.warning("No LLM available for Word analysis")
+            return {"document_type": "OTHER", "equipment": [], "sequences": [], "alarms": []}
+
+        if not section_text or len(section_text.strip()) < 50:
+            return {"document_type": "OTHER", "equipment": [], "sequences": [], "alarms": []}
+
+        # Truncate if too long
+        text_to_analyze = section_text[:12000] if len(section_text) > 12000 else section_text
+
+        prompt = f"""{WORD_ANALYSIS_PROMPT}
+
+File: {filename}
+Section: {section_heading or "Document Content"}
+
+Document Text:
+---
+{text_to_analyze}
+---
+
+Analyze this document section and extract all equipment, sequences, control logic, and alarms. Respond with JSON only."""
+
+        try:
+            start_time = time.time()
+            logger.debug(f"[AI] Analyzing Word: {filename} / {section_heading[:50] if section_heading else 'content'}...")
+
+            response = self._call_llm(prompt, max_tokens=4000)
+            result = self._parse_json_response(response)
+
+            elapsed = time.time() - start_time
+            eq_count = len(result.get("equipment", []))
+            seq_count = len(result.get("sequences", []))
+            alarm_count = len(result.get("alarms", []))
+
+            logger.debug(f"[AI] Word analyzed in {elapsed:.1f}s | {eq_count} equipment | {seq_count} sequences | {alarm_count} alarms")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Word analysis error for {filename}: {e}")
+            return {"document_type": "OTHER", "equipment": [], "sequences": [], "alarms": [], "error": str(e)}
+
+    def analyze_supplementary_document(self, content: str, filename: str, doc_type: str) -> Dict:
+        """
+        Unified method to analyze any supplementary document.
+
+        Args:
+            content: Text content of the document
+            filename: Name of the file
+            doc_type: Type of document (EXCEL or WORD)
+
+        Returns:
+            Combined analysis results
+        """
+        if doc_type == "EXCEL":
+            return self.analyze_excel_data(content, filename)
+        elif doc_type == "WORD":
+            return self.analyze_word_content(content, filename)
+        else:
+            logger.warning(f"Unknown document type: {doc_type}")
+            return {"error": f"Unknown document type: {doc_type}"}
 
 
 # Singleton instance
