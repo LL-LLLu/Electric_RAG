@@ -1,6 +1,9 @@
 """Equipment tag patterns for extraction"""
 
 EQUIPMENT_PATTERNS = [
+    # RTU - Remote Terminal Units (high priority - often missed)
+    (r'\bRTU[-_]?\d{1,4}[A-Z]?\b', 'RTU'),
+    (r'\bRTU\d{1,4}[A-Z]?\b', 'RTU'),
     # Standard patterns: TYPE-NUMBER or TYPE_NUMBER
     (r'\b(FAN|AHU|FCU|VAV|MAU|EF|SF|RF)-?\d{1,4}[A-Z]?\b', 'FAN'),
     (r'\b(MOT|MTR|M)-?\d{1,4}[A-Z]?\b', 'MOTOR'),
@@ -11,9 +14,18 @@ EQUIPMENT_PATTERNS = [
     (r'\b(PLC|DCS|PAC)-?\d{1,4}[A-Z]?\b', 'PLC'),
     (r'\b(TS|PS|FS|LS|PT|FT|LT|TT)-?\d{1,4}[A-Z]?\b', 'SENSOR'),
     (r'\b(CV|MOV|SOV|BV|GV)-?\d{1,4}[A-Z]?\b', 'VALVE'),
-    (r'\b(MCC|SWG|PNL|DP)-?\d{1,4}[A-Z]?\b', 'PANEL'),
-    (r'\b(XFMR|TX|TR)-?\d{1,4}[A-Z]?\b', 'TRANSFORMER'),
-    # Generic pattern for unrecognized equipment
+    (r'\b(MCC|SWG|PNL|DP|LP|MDP)-?\d{1,4}[A-Z]?\b', 'PANEL'),
+    (r'\b(XFMR|TX|TR|T)-?\d{1,4}[A-Z]?\b', 'TRANSFORMER'),
+    # Additional equipment types
+    (r'\b(SW|HS|SS|DS)-?\d{1,4}[A-Z]?\b', 'SWITCH'),
+    (r'\b(HMI|OIT|OIU)-?\d{1,4}[A-Z]?\b', 'HMI'),
+    (r'\b(UPS)-?\d{1,4}[A-Z]?\b', 'UPS'),
+    (r'\b(GEN|DG|EG)-?\d{1,4}[A-Z]?\b', 'GENERATOR'),
+    (r'\b(CAP|CAPBANK)-?\d{1,4}[A-Z]?\b', 'CAPACITOR'),
+    (r'\b(CT|VT|PT)-?\d{1,4}[A-Z]?\b', 'INSTRUMENT_TRANSFORMER'),
+    # Protective relays (ANSI device numbers)
+    (r'\b(27|50|51|52|59|67|81|86|87)-?\d{0,2}[A-Z]?\b', 'PROTECTIVE_RELAY'),
+    # Generic pattern for unrecognized equipment (alphanumeric tags)
     (r'\b([A-Z]{2,4})-(\d{2,4})([A-Z]?)\b', 'OTHER'),
 ]
 

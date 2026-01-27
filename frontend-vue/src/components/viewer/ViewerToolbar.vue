@@ -30,7 +30,7 @@ const emit = defineEmits<{
 }>()
 
 // Available zoom levels
-const zoomLevels = [50, 75, 100, 125, 150, 200]
+const zoomLevels = [15, 25, 50, 75, 100, 125, 150, 200]
 
 // Check if can zoom in/out
 const canZoomIn = computed(() => props.zoom < Math.max(...zoomLevels))

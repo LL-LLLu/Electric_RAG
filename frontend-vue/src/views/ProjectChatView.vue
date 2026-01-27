@@ -1,57 +1,137 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeftIcon, PaperAirplaneIcon } from '@heroicons/vue/24/outline'
+import { ArrowLeftIcon } from '@heroicons/vue/24/outline'
 import { useProjectsStore } from '@/stores/projects'
+import { useConversationsStore } from '@/stores/conversations'
+import * as documentsApi from '@/api/documents'
+import type { Document } from '@/types'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import ErrorAlert from '@/components/common/ErrorAlert.vue'
+import ChatMessageList from '@/components/chat/ChatMessageList.vue'
+import ChatInput from '@/components/chat/ChatInput.vue'
+import PdfViewer from '@/components/viewer/PdfViewer.vue'
 
 const route = useRoute()
 const router = useRouter()
 const projectsStore = useProjectsStore()
+const conversationsStore = useConversationsStore()
 
+// State
 const loading = ref(false)
 const error = ref<string | null>(null)
-const messageInput = ref('')
+const documents = ref<Document[]>([])
+const viewerDocumentId = ref<number | null>(null)
+const viewerPageNumber = ref(1)
 
+// Computed
 const projectId = computed(() => Number(route.params.id))
-const conversationId = computed(() => route.params.conversationId ? Number(route.params.conversationId) : null)
+const conversationId = computed(() =>
+  route.params.conversationId ? Number(route.params.conversationId) : null
+)
 const project = computed(() => projectsStore.currentProject)
+const messages = computed(() => conversationsStore.messages)
+const sending = computed(() => conversationsStore.sending)
+const hasConversation = computed(() => conversationsStore.hasConversation)
 
-async function loadProject() {
+// Load project and initialize conversation
+async function initialize() {
   loading.value = true
   error.value = null
+
   try {
-    await projectsStore.fetchProject(projectId.value)
+    // Load project if not already loaded
+    if (!project.value || project.value.id !== projectId.value) {
+      await projectsStore.fetchProject(projectId.value)
+    }
+
+    // Load project documents for the PDF viewer
+    documents.value = await documentsApi.listByProject(projectId.value)
+
+    // Load or create conversation
+    if (conversationId.value) {
+      // Resume existing conversation
+      await conversationsStore.fetchConversation(conversationId.value)
+    } else {
+      // Create new conversation
+      await conversationsStore.createConversation(projectId.value, {})
+      // Update URL with new conversation ID
+      if (conversationsStore.currentConversation) {
+        router.replace({
+          name: 'project-chat',
+          params: {
+            id: projectId.value,
+            conversationId: conversationsStore.currentConversation.id,
+          },
+        })
+      }
+    }
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to load project'
+    error.value = e instanceof Error ? e.message : 'Failed to initialize chat'
   } finally {
     loading.value = false
   }
 }
 
+// Send message
+async function handleSendMessage(content: string) {
+  if (!hasConversation.value) return
+
+  try {
+    const response = await conversationsStore.sendMessage(content)
+
+    // If response has sources, show the first one in the viewer
+    if (response?.sources && response.sources.length > 0) {
+      const firstSource = response.sources[0]
+      if (firstSource) {
+        viewerDocumentId.value = firstSource.document_id
+        viewerPageNumber.value = firstSource.page_number
+      }
+    }
+  } catch (e) {
+    // Error is handled by the store
+    console.error('Failed to send message:', e)
+  }
+}
+
+// View source in PDF viewer
+function handleViewSource(documentId: number, pageNumber: number) {
+  viewerDocumentId.value = documentId
+  viewerPageNumber.value = pageNumber
+}
+
+// Navigation
 function goBack() {
   router.push({ name: 'project-dashboard', params: { id: projectId.value } })
 }
 
-function sendMessage() {
-  if (!messageInput.value.trim()) return
-  // TODO: Implement message sending
-  console.log('Send message:', messageInput.value)
-  messageInput.value = ''
-}
-
-onMounted(() => {
-  if (!project.value || project.value.id !== projectId.value) {
-    loadProject()
+// Watch for route changes (switching conversations)
+watch(
+  () => route.params.conversationId,
+  async (newId) => {
+    if (newId && Number(newId) !== conversationsStore.currentConversation?.id) {
+      loading.value = true
+      try {
+        await conversationsStore.fetchConversation(Number(newId))
+      } catch (e) {
+        error.value = e instanceof Error ? e.message : 'Failed to load conversation'
+      } finally {
+        loading.value = false
+      }
+    }
   }
+)
+
+// Initialize on mount
+onMounted(() => {
+  initialize()
 })
 </script>
 
 <template>
   <div class="project-chat h-screen flex flex-col bg-gray-50">
     <!-- Header -->
-    <div class="bg-white border-b border-gray-200 px-4 py-3">
+    <div class="bg-white border-b border-gray-200 px-4 py-3 flex-shrink-0">
       <div class="flex items-center justify-between">
         <div class="flex items-center">
           <button
@@ -63,7 +143,7 @@ onMounted(() => {
           </button>
           <div>
             <h1 class="text-lg font-semibold text-gray-900">
-              {{ conversationId ? 'Chat' : 'New Chat' }}
+              {{ conversationsStore.currentConversation?.title || 'New Chat' }}
             </h1>
             <p v-if="project" class="text-sm text-gray-500">
               {{ project.name }}
@@ -86,53 +166,31 @@ onMounted(() => {
     <!-- Chat Layout (20% chat / 80% viewer) -->
     <div v-else class="flex-1 flex overflow-hidden">
       <!-- Chat Panel (20%) -->
-      <div class="w-1/5 min-w-[280px] bg-white border-r border-gray-200 flex flex-col">
+      <div class="w-1/5 min-w-[320px] max-w-[400px] bg-white border-r border-gray-200 flex flex-col">
         <!-- Messages Area -->
-        <div class="flex-1 overflow-y-auto p-4">
-          <div class="text-center py-16">
-            <p class="text-gray-500 mb-2">Start a conversation</p>
-            <p class="text-sm text-gray-400">
-              Ask questions about your electrical drawings.
-            </p>
-            <p class="text-xs text-gray-400 mt-4">
-              (Full implementation in Phase 4)
-            </p>
-          </div>
-        </div>
+        <ChatMessageList
+          :messages="messages"
+          :loading="sending"
+          @view-source="handleViewSource"
+        />
 
         <!-- Input Area -->
-        <div class="p-4 border-t border-gray-200">
-          <div class="flex gap-2">
-            <input
-              v-model="messageInput"
-              type="text"
-              placeholder="Ask a question..."
-              class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              @keyup.enter="sendMessage"
-            />
-            <button
-              type="button"
-              class="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-              :disabled="!messageInput.trim()"
-              @click="sendMessage"
-            >
-              <PaperAirplaneIcon class="h-5 w-5" />
-            </button>
-          </div>
-        </div>
+        <ChatInput
+          :disabled="sending || !hasConversation"
+          placeholder="Ask about your electrical drawings..."
+          @send="handleSendMessage"
+        />
       </div>
 
       <!-- PDF Viewer Panel (80%) -->
-      <div class="flex-1 bg-gray-100 flex items-center justify-center">
-        <div class="text-center">
-          <p class="text-gray-500 mb-2">PDF Viewer</p>
-          <p class="text-sm text-gray-400">
-            Source documents will be displayed here.
-          </p>
-          <p class="text-xs text-gray-400 mt-4">
-            (Full implementation in Phase 4)
-          </p>
-        </div>
+      <div class="flex-1 bg-gray-100">
+        <PdfViewer
+          :document-id="viewerDocumentId"
+          :page-number="viewerPageNumber"
+          :documents="documents"
+          @document-change="(id: number) => (viewerDocumentId = id)"
+          @page-change="(num: number) => (viewerPageNumber = num)"
+        />
       </div>
     </div>
   </div>

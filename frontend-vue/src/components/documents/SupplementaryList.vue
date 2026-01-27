@@ -195,6 +195,8 @@ async function handleFileSelect(event: Event) {
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i]
+    if (!file) continue
+
     uploadProgress.value.current = i + 1
 
     try {
@@ -210,8 +212,10 @@ async function handleFileSelect(event: Event) {
 
   if (errors.length > 0) {
     uploadError.value = errors.length === 1
-      ? errors[0]
+      ? (errors[0] ?? 'Upload failed')
       : `${errors.length} files failed to upload`
+  } else {
+    uploadError.value = ''
   }
 
   selectedCategory.value = ''
@@ -312,6 +316,6 @@ onMounted(() => {
 
 <style scoped>
 .supplementary-list {
-  @apply p-4;
+  padding: 1rem;
 }
 </style>

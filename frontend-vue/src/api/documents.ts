@@ -1,5 +1,5 @@
 import api from './index'
-import type { Document, DocumentDetail } from '@/types'
+import type { Document, DocumentDetail, DocumentProjectAssign } from '@/types'
 
 // Response type for document upload
 export interface UploadResponse {
@@ -32,6 +32,30 @@ export interface DocumentPagesResponse {
  */
 export async function list(skip = 0, limit = 20): Promise<Document[]> {
   const response = await api.get<Document[]>('/api/documents', {
+    params: { skip, limit },
+  })
+  return response.data
+}
+
+/**
+ * List documents for a specific project
+ */
+export async function listByProject(
+  projectId: number,
+  skip = 0,
+  limit = 50
+): Promise<Document[]> {
+  const response = await api.get<Document[]>(`/api/documents/project/${projectId}`, {
+    params: { skip, limit },
+  })
+  return response.data
+}
+
+/**
+ * List documents not assigned to any project
+ */
+export async function listUnassigned(skip = 0, limit = 50): Promise<Document[]> {
+  const response = await api.get<Document[]>('/api/documents/unassigned', {
     params: { skip, limit },
   })
   return response.data
@@ -88,6 +112,18 @@ export async function retry(id: number): Promise<RetryResponse> {
 }
 
 /**
+ * Assign or reassign a document to a project
+ * Pass null for project_id to unassign from all projects
+ */
+export async function assignToProject(
+  documentId: number,
+  data: DocumentProjectAssign
+): Promise<Document> {
+  const response = await api.patch<Document>(`/api/documents/${documentId}/project`, data)
+  return response.data
+}
+
+/**
  * Get the URL for a page image
  * Note: This returns a URL string, not the actual image data
  */
@@ -108,10 +144,13 @@ export async function getPages(id: number): Promise<DocumentPagesResponse> {
 // Export all functions as a module
 export const documentsApi = {
   list,
+  listByProject,
+  listUnassigned,
   get,
   upload,
   delete: deleteDocument,
   retry,
+  assignToProject,
   getPageImageUrl,
   getPages,
 }

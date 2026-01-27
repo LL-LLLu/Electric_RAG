@@ -63,8 +63,9 @@ const groupedDocuments = computed<GroupedDocument[]>(() => {
 
 // Expand first document by default
 watch(groupedDocuments, (docs) => {
-  if (docs.length > 0 && expandedDocs.value.size === 0) {
-    expandedDocs.value.add(docs[0].document_id)
+  const firstDoc = docs[0]
+  if (firstDoc && expandedDocs.value.size === 0) {
+    expandedDocs.value.add(firstDoc.document_id)
   }
 }, { immediate: true })
 

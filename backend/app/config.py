@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
 
     upload_dir: str = os.environ.get("UPLOAD_DIR", "/app/uploads")
-    max_upload_size: int = 50 * 1024 * 1024  # 50MB
+    max_upload_size: int = 1024 * 1024 * 1024  # 1GB
 
     cors_origins: list = ["*"]
 

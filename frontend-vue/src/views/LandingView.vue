@@ -7,9 +7,9 @@ import {
   FolderIcon,
   DocumentTextIcon,
   CpuChipIcon,
-  ChatBubbleLeftRightIcon,
 } from '@heroicons/vue/24/outline'
 import { useProjectsStore } from '@/stores/projects'
+import * as documentsApi from '@/api/documents'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import ErrorAlert from '@/components/common/ErrorAlert.vue'
 import ProjectCard from '@/components/projects/ProjectCard.vue'
@@ -23,6 +23,7 @@ const searchQuery = ref('')
 const showCreateModal = ref(false)
 const loading = ref(false)
 const error = ref<string | null>(null)
+const unassignedCount = ref(0)
 
 // Computed
 const filteredProjects = computed(() => {
@@ -48,12 +49,15 @@ const totalStats = computed(() => {
   }
 })
 
-// Load projects
+// Load projects and unassigned documents count
 async function loadProjects() {
   loading.value = true
   error.value = null
   try {
     await projectsStore.fetchProjects()
+    // Also load unassigned documents count
+    const unassignedDocs = await documentsApi.listUnassigned()
+    unassignedCount.value = unassignedDocs.length
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed to load projects'
   } finally {
@@ -61,8 +65,13 @@ async function loadProjects() {
   }
 }
 
+// Navigate to unassigned documents
+function navigateToUnassigned() {
+  router.push({ name: 'unassigned-documents' })
+}
+
 // Handle project creation
-async function handleCreateProject(data: { name: string; description?: string; system_type?: string; facility_name?: string }) {
+async function handleCreateProject(data: { name: string; description?: string | null; system_type?: string | null; facility_name?: string | null; status?: string; notes?: string | null; tags?: string[] }) {
   try {
     const project = await projectsStore.createProject(data)
     showCreateModal.value = false
@@ -138,6 +147,29 @@ onMounted(() => {
             <div class="text-sm text-blue-200">Equipment</div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Unassigned Documents Banner -->
+    <div v-if="unassignedCount > 0" class="container mx-auto px-4 pt-6">
+      <div
+        class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 flex items-center justify-between cursor-pointer hover:bg-yellow-100 transition-colors"
+        @click="navigateToUnassigned"
+      >
+        <div class="flex items-center">
+          <DocumentTextIcon class="h-6 w-6 text-yellow-600 mr-3" />
+          <div>
+            <p class="font-medium text-yellow-800">
+              {{ unassignedCount }} unassigned document{{ unassignedCount !== 1 ? 's' : '' }}
+            </p>
+            <p class="text-sm text-yellow-600">
+              Click here to assign them to projects
+            </p>
+          </div>
+        </div>
+        <svg class="h-5 w-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+        </svg>
       </div>
     </div>
 

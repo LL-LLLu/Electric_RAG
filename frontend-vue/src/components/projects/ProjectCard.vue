@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import {
   FolderIcon,
-  DocumentTextIcon,
-  CpuChipIcon,
   EllipsisVerticalIcon,
   TrashIcon,
   PencilIcon,

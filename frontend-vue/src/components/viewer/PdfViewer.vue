@@ -149,14 +149,14 @@ function handleKeydown(event: KeyboardEvent) {
     case '+':
     case '=':
       if (zoom.value < 200) {
-        const levels = [50, 75, 100, 125, 150, 200]
+        const levels = [15, 25, 50, 75, 100, 125, 150, 200]
         const nextLevel = levels.find(l => l > zoom.value)
         if (nextLevel) zoom.value = nextLevel
       }
       break
     case '-':
-      if (zoom.value > 50) {
-        const levels = [50, 75, 100, 125, 150, 200].reverse()
+      if (zoom.value > 15) {
+        const levels = [15, 25, 50, 75, 100, 125, 150, 200].reverse()
         const nextLevel = levels.find(l => l < zoom.value)
         if (nextLevel) zoom.value = nextLevel
       }

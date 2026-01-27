@@ -5,7 +5,20 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     name: 'home',
+    alias: '/landing',
     component: () => import('@/views/LandingView.vue')
+  },
+  {
+    path: '/landing',
+    name: 'landing',
+    redirect: '/'
+  },
+
+  // Unassigned documents
+  {
+    path: '/unassigned-documents',
+    name: 'unassigned-documents',
+    component: () => import('@/views/UnassignedDocumentsView.vue')
   },
 
   // Project routes

@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { MagnifyingGlassIcon, FunnelIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import { ref, computed, onMounted, watch } from 'vue'
+import { MagnifyingGlassIcon, FunnelIcon, XMarkIcon, FolderIcon, DocumentTextIcon } from '@heroicons/vue/24/outline'
 import { useEquipmentStore } from '@/stores/equipment'
 import * as equipmentApi from '@/api/equipment'
-import type { Equipment, EquipmentDetail } from '@/types'
+import * as projectsApi from '@/api/projects'
+import * as documentsApi from '@/api/documents'
+import type { Equipment, EquipmentDetail, Project, Document } from '@/types'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import ErrorAlert from '@/components/common/ErrorAlert.vue'
 import EquipmentCard from '@/components/equipment/EquipmentCard.vue'
@@ -11,10 +13,18 @@ import EquipmentDetailComponent from '@/components/equipment/EquipmentDetail.vue
 
 const equipmentStore = useEquipmentStore()
 
+// Selection state
+const projects = ref<Project[]>([])
+const documents = ref<Document[]>([])
+const selectedProjectId = ref<number | null>(null)
+const selectedDocumentId = ref<number | null>(null)
+
 // Local state
 const searchInput = ref('')
 const selectedType = ref('')
 const loading = ref(false)
+const loadingProjects = ref(false)
+const loadingDocuments = ref(false)
 const error = ref<string | null>(null)
 const selectedEquipment = ref<EquipmentDetail | null>(null)
 const loadingDetail = ref(false)
@@ -23,34 +33,78 @@ const detailError = ref<string | null>(null)
 // Computed
 const hasFilters = computed(() => searchInput.value !== '' || selectedType.value !== '')
 
+const selectedProject = computed(() =>
+  projects.value.find((p) => p.id === selectedProjectId.value)
+)
+
+const selectedDocument = computed(() =>
+  documents.value.find((d) => d.id === selectedDocumentId.value)
+)
+
 const filteredEquipment = computed(() => {
   let result = equipmentStore.equipment
 
   // Filter by search query (local filtering)
   if (searchInput.value) {
     const query = searchInput.value.toLowerCase()
-    result = result.filter(e =>
-      e.tag.toLowerCase().includes(query) ||
-      e.equipment_type.toLowerCase().includes(query) ||
-      (e.description && e.description.toLowerCase().includes(query))
+    result = result.filter(
+      (e) =>
+        e.tag.toLowerCase().includes(query) ||
+        e.equipment_type.toLowerCase().includes(query) ||
+        (e.description && e.description.toLowerCase().includes(query))
     )
   }
 
   // Filter by type
   if (selectedType.value) {
-    result = result.filter(e => e.equipment_type === selectedType.value)
+    result = result.filter((e) => e.equipment_type === selectedType.value)
   }
 
   return result
 })
 
-// Load equipment data
+// Load projects on mount
+async function loadProjects() {
+  loadingProjects.value = true
+  try {
+    projects.value = await projectsApi.list()
+  } catch (err) {
+    console.error('Error loading projects:', err)
+  } finally {
+    loadingProjects.value = false
+  }
+}
+
+// Load documents for selected project
+async function loadDocuments() {
+  if (!selectedProjectId.value) {
+    documents.value = []
+    return
+  }
+
+  loadingDocuments.value = true
+  try {
+    documents.value = await documentsApi.listByProject(selectedProjectId.value)
+  } catch (err) {
+    console.error('Error loading documents:', err)
+  } finally {
+    loadingDocuments.value = false
+  }
+}
+
+// Load equipment for selected document
 async function loadEquipment() {
+  if (!selectedDocumentId.value) {
+    equipmentStore.setEquipment([])
+    equipmentStore.setTotalCount(0)
+    return
+  }
+
   loading.value = true
   error.value = null
 
   try {
-    const equipment = await equipmentApi.list({ limit: 200 })
+    const equipment = await equipmentApi.listByDocument(selectedDocumentId.value, { limit: 500 })
     equipmentStore.setEquipment(equipment)
     equipmentStore.setTotalCount(equipment.length)
   } catch (err) {
@@ -70,6 +124,21 @@ async function loadEquipmentTypes() {
     console.error('Error loading equipment types:', err)
   }
 }
+
+// Watch for project selection change
+watch(selectedProjectId, () => {
+  selectedDocumentId.value = null
+  equipmentStore.setEquipment([])
+  equipmentStore.setTotalCount(0)
+  selectedEquipment.value = null
+  loadDocuments()
+})
+
+// Watch for document selection change
+watch(selectedDocumentId, () => {
+  selectedEquipment.value = null
+  loadEquipment()
+})
 
 // Handle equipment card click - load detail
 async function handleEquipmentSelect(equipment: Equipment) {
@@ -122,7 +191,7 @@ function dismissError() {
 
 // Initialize on mount
 onMounted(() => {
-  loadEquipment()
+  loadProjects()
   loadEquipmentTypes()
 })
 </script>
@@ -134,19 +203,76 @@ onMounted(() => {
       <div class="mb-8">
         <h1 class="text-3xl font-bold text-gray-900 mb-2">Equipment Browser</h1>
         <p class="text-gray-600">
-          Browse and search extracted equipment from documents.
-          <span v-if="!loading" class="text-blue-600 font-medium">
-            {{ filteredEquipment.length }} of {{ equipmentStore.totalCount }} items
-          </span>
+          Select a project and document to browse equipment.
         </p>
       </div>
 
-      <!-- Search and Filter Bar -->
+      <!-- Project and Document Selection -->
       <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- Project Selection -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+              <FolderIcon class="h-4 w-4 inline mr-1" />
+              Select Project
+            </label>
+            <select
+              v-model="selectedProjectId"
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              :disabled="loadingProjects"
+            >
+              <option :value="null">-- Select a project --</option>
+              <option v-for="project in projects" :key="project.id" :value="project.id">
+                {{ project.name }}
+              </option>
+            </select>
+          </div>
+
+          <!-- Document Selection -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+              <DocumentTextIcon class="h-4 w-4 inline mr-1" />
+              Select Document
+            </label>
+            <select
+              v-model="selectedDocumentId"
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              :disabled="!selectedProjectId || loadingDocuments"
+            >
+              <option :value="null">
+                {{ !selectedProjectId ? '-- Select a project first --' : '-- Select a document --' }}
+              </option>
+              <option v-for="doc in documents" :key="doc.id" :value="doc.id">
+                {{ doc.original_filename }} ({{ doc.page_count || 0 }} pages)
+              </option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Selected info -->
+        <div v-if="selectedProject && selectedDocument" class="mt-4 p-3 bg-blue-50 rounded-lg">
+          <p class="text-sm text-blue-800">
+            <span class="font-medium">{{ selectedProject.name }}</span>
+            &rarr;
+            <span class="font-medium">{{ selectedDocument.original_filename }}</span>
+            <span v-if="!loading" class="text-blue-600 ml-2">
+              ({{ filteredEquipment.length }} equipment items)
+            </span>
+          </p>
+        </div>
+      </div>
+
+      <!-- Search and Filter Bar (only shown when document is selected) -->
+      <div
+        v-if="selectedDocumentId"
+        class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6"
+      >
         <div class="flex flex-col sm:flex-row gap-4">
           <!-- Search Input -->
           <div class="flex-1 relative">
-            <MagnifyingGlassIcon class="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+            <MagnifyingGlassIcon
+              class="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400"
+            />
             <input
               v-model="searchInput"
               type="text"
@@ -195,8 +321,20 @@ onMounted(() => {
         @dismiss="dismissError"
       />
 
+      <!-- Empty State - No project/document selected -->
+      <div
+        v-if="!selectedDocumentId && !loading"
+        class="text-center py-16 bg-white rounded-lg border border-gray-200"
+      >
+        <FolderIcon class="mx-auto h-16 w-16 text-gray-300 mb-4" />
+        <h3 class="text-lg font-medium text-gray-900 mb-2">Select a project and document</h3>
+        <p class="text-sm text-gray-500">
+          Choose a project and document from the dropdowns above to view equipment.
+        </p>
+      </div>
+
       <!-- Loading State -->
-      <div v-if="loading" class="flex justify-center py-16">
+      <div v-else-if="loading" class="flex justify-center py-16">
         <LoadingSpinner size="large" text="Loading equipment..." />
       </div>
 
@@ -204,7 +342,7 @@ onMounted(() => {
       <div v-else class="flex flex-col lg:flex-row gap-6">
         <!-- Equipment Grid -->
         <div class="flex-1">
-          <!-- Empty State -->
+          <!-- Empty State - No equipment in document -->
           <div
             v-if="filteredEquipment.length === 0 && !loading"
             class="text-center py-16 bg-white rounded-lg border border-gray-200"
@@ -228,7 +366,7 @@ onMounted(() => {
                 Try adjusting your search or filter criteria.
               </template>
               <template v-else>
-                Upload and process documents to extract equipment data.
+                No equipment was extracted from this document.
               </template>
             </p>
             <button
@@ -242,10 +380,7 @@ onMounted(() => {
           </div>
 
           <!-- Equipment Grid -->
-          <div
-            v-else
-            class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4"
-          >
+          <div v-else class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
             <EquipmentCard
               v-for="item in filteredEquipment"
               :key="item.id"

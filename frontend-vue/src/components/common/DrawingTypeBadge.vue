@@ -33,9 +33,11 @@ const typeConfig: Record<string, { label: string; class: string }> = {
   }
 }
 
-const config = computed(() => {
+const config = computed((): { label: string; class: string } => {
   const t = props.type?.toUpperCase() || 'GENERAL'
-  return typeConfig[t] || typeConfig.GENERAL
+  const result = typeConfig[t]
+  if (result) return result
+  return { label: 'General', class: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400' }
 })
 
 const sizeClass = computed(() => {
