@@ -21,6 +21,9 @@ router = APIRouter()
 # Allowed file extensions
 ALLOWED_EXTENSIONS = {'.xlsx', '.xls', '.csv', '.docx'}
 
+# Maximum file size per design spec
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+
 
 def get_document_type(filename: str) -> str:
     """Determine document type from filename"""
@@ -64,30 +67,49 @@ async def upload_supplementary(
 
     file_path = os.path.join(supp_dir, unique_filename)
 
-    # Save file
+    # Read and validate file size
     try:
         content = await file.read()
+        file_size = len(content)
+
+        if file_size > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)} MB"
+            )
+
         with open(file_path, "wb") as f:
             f.write(content)
-        file_size = len(content)
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
     except Exception as e:
         logger.error(f"Failed to save file: {e}")
         raise HTTPException(status_code=500, detail="Failed to save file")
 
-    # Create database record
-    document = SupplementaryDocument(
-        project_id=project_id,
-        filename=unique_filename,
-        original_filename=file.filename,
-        document_type=document_type,
-        content_category=content_category,
-        file_path=file_path,
-        file_size=file_size,
-        processed=0
-    )
-    db.add(document)
-    db.commit()
-    db.refresh(document)
+    # Create database record (with cleanup on failure)
+    try:
+        document = SupplementaryDocument(
+            project_id=project_id,
+            filename=unique_filename,
+            original_filename=file.filename,
+            document_type=document_type,
+            content_category=content_category,
+            file_path=file_path,
+            file_size=file_size,
+            processed=0
+        )
+        db.add(document)
+        db.commit()
+        db.refresh(document)
+    except Exception as e:
+        # Clean up file if database operation failed
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception:
+                logger.warning(f"Failed to clean up orphaned file: {file_path}")
+        logger.error(f"Failed to create document record: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create document record")
 
     # Process in background
     background_tasks.add_task(process_document_task, document.id)
@@ -175,14 +197,20 @@ async def reprocess_supplementary(
     return {"message": "Reprocessing started"}
 
 
-@router.get("/equipment/{tag}/profile", response_model=EquipmentProfileResponse)
-async def get_equipment_profile(tag: str, db: Session = Depends(get_db)):
-    """Get the aggregated profile for an equipment tag"""
+def get_equipment_by_tag(tag: str, db: Session) -> Equipment:
+    """Get equipment by tag with case-insensitive lookup"""
     equipment = db.query(Equipment).filter(
         Equipment.tag.ilike(tag)
     ).first()
     if not equipment:
         raise HTTPException(status_code=404, detail=f"Equipment '{tag}' not found")
+    return equipment
+
+
+@router.get("/equipment/{tag}/profile", response_model=EquipmentProfileResponse)
+async def get_equipment_profile(tag: str, db: Session = Depends(get_db)):
+    """Get the aggregated profile for an equipment tag"""
+    equipment = get_equipment_by_tag(tag, db)
 
     profile = db.query(EquipmentProfile).filter(
         EquipmentProfile.equipment_id == equipment.id
@@ -196,11 +224,7 @@ async def get_equipment_profile(tag: str, db: Session = Depends(get_db)):
 @router.get("/equipment/{tag}/aliases", response_model=List[EquipmentAliasResponse])
 async def get_equipment_aliases(tag: str, db: Session = Depends(get_db)):
     """Get all aliases for an equipment tag"""
-    equipment = db.query(Equipment).filter(
-        Equipment.tag.ilike(tag)
-    ).first()
-    if not equipment:
-        raise HTTPException(status_code=404, detail=f"Equipment '{tag}' not found")
+    equipment = get_equipment_by_tag(tag, db)
 
     aliases = db.query(EquipmentAlias).filter(
         EquipmentAlias.equipment_id == equipment.id
@@ -215,11 +239,7 @@ async def add_equipment_alias(
     db: Session = Depends(get_db)
 ):
     """Add a manual alias for an equipment tag"""
-    equipment = db.query(Equipment).filter(
-        Equipment.tag.ilike(tag)
-    ).first()
-    if not equipment:
-        raise HTTPException(status_code=404, detail=f"Equipment '{tag}' not found")
+    equipment = get_equipment_by_tag(tag, db)
 
     # Check if alias already exists
     existing = db.query(EquipmentAlias).filter(
