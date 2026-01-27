@@ -15,6 +15,7 @@ class WordProcessor:
     MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
     TARGET_CHUNK_SIZE = 500  # Target tokens per chunk (approximately)
     CHUNK_OVERLAP = 50  # Overlap between chunks
+    MAX_CELL_LENGTH = 5000  # Maximum characters per table cell
 
     # Equipment tag pattern
     TAG_PATTERN = re.compile(r'\b[A-Z]{2,4}[-_\s]?[A-Z]?\d{1,4}[A-Z]?\b', re.IGNORECASE)
@@ -43,6 +44,9 @@ class WordProcessor:
 
         # Extract content by sections
         sections = self._extract_sections(doc)
+
+        if not sections:
+            logger.warning(f"No sections extracted from document {file_path}")
 
         # Process each section into chunks
         for section in sections:
@@ -119,6 +123,21 @@ class WordProcessor:
         # Don't forget the last section
         if current_section['content'].strip():
             sections.append(current_section)
+
+        # Handle documents with only headings (no body content)
+        if not sections and heading_stack:
+            logger.warning(f"Document contains only headings without body content")
+            # Create a minimal section from headings
+            all_headings = '\n'.join([h[0] for h in heading_stack])
+            sections.append({
+                'heading': 'Document Headings',
+                'heading_path': '',
+                'content': all_headings,
+                'level': 0
+            })
+
+        if not sections:
+            logger.warning(f"No extractable content found in document")
 
         return sections
 
@@ -205,7 +224,7 @@ class WordProcessor:
                 continue  # Skip tables without data rows
 
             # Get header row
-            headers = [cell.text.strip().lower() for cell in table.rows[0].cells]
+            headers = [cell.text.strip()[:self.MAX_CELL_LENGTH].lower() for cell in table.rows[0].cells]
 
             # Look for equipment column
             equipment_col = None
@@ -219,7 +238,7 @@ class WordProcessor:
 
             # Extract data rows
             for row_idx, row in enumerate(table.rows[1:], start=1):
-                cells = [cell.text.strip() for cell in row.cells]
+                cells = [cell.text.strip()[:self.MAX_CELL_LENGTH] for cell in row.cells]
 
                 if len(cells) <= equipment_col:
                     continue
@@ -232,7 +251,8 @@ class WordProcessor:
                 row_data = {}
                 for i, header in enumerate(headers):
                     if i < len(cells) and cells[i]:
-                        row_data[header] = cells[i]
+                        value = cells[i][:self.MAX_CELL_LENGTH] if len(cells[i]) > self.MAX_CELL_LENGTH else cells[i]
+                        row_data[header] = value
 
                 structured_data.append({
                     'equipment_tag': equipment_tag.upper(),
