@@ -425,6 +425,7 @@ class SearchResult(BaseModel):
     relevance_score: float
     snippet: Optional[str] = None
     match_type: str
+    source_location: Optional[str] = None  # For supplementary docs: "Sheet1:A1-F20"
 
 
 class SearchResponse(BaseModel):
