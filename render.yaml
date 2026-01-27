@@ -1,0 +1,49 @@
+databases:
+  - name: electric-rag-db
+    plan: free
+    databaseName: electrical_rag
+    user: electric_rag_user
+    postgresMajorVersion: 16
+
+services:
+  # Backend API
+  - type: web
+    name: electric-rag-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: electric-rag-db
+          property: connectionString
+      - key: GEMINI_API_KEY
+        sync: false  # Set manually in Render dashboard
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: "false"
+    disk:
+      name: uploads
+      mountPath: /app/uploads
+      sizeGB: 1
+    autoDeploy: true
+
+  # Frontend
+  - type: web
+    name: electric-rag-frontend
+    runtime: docker
+    dockerfilePath: ./frontend-vue/Dockerfile
+    dockerContext: ./frontend-vue
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: PORT
+        value: "10000"
+      # VITE_API_URL must be set manually as build-time arg in Render dashboard
+      # Set to: https://electric-rag-backend.onrender.com
+    autoDeploy: true
