@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 class ExcelProcessor:
     """Process Excel files to extract structured equipment data and text chunks"""
 
+    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB per design spec
+
     # Common equipment column indicators
     EQUIPMENT_COLUMN_PATTERNS = [
         r'equipment[\s_-]*(tag|id|name)?',
@@ -31,6 +33,18 @@ class ExcelProcessor:
         'SEQUENCE': ['sequence', 'step', 'operation', 'mode'],
     }
 
+    def _validate_file(self, file_path: str) -> None:
+        """Validate file exists and is within size limits"""
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        file_size = os.path.getsize(file_path)
+        if file_size > self.MAX_FILE_SIZE:
+            raise ValueError(f"File too large: {file_size} bytes exceeds {self.MAX_FILE_SIZE} limit")
+
+        if file_size == 0:
+            raise ValueError(f"File is empty: {file_path}")
+
     def parse_file(self, file_path: str) -> Tuple[List[Dict], List[Dict]]:
         """Parse Excel/CSV file and extract data
 
@@ -40,6 +54,7 @@ class ExcelProcessor:
         Returns:
             Tuple of (structured_data_list, text_chunks_list)
         """
+        self._validate_file(file_path)
         ext = os.path.splitext(file_path)[1].lower()
 
         if ext == '.csv':
@@ -52,11 +67,23 @@ class ExcelProcessor:
     def _parse_csv(self, file_path: str) -> Tuple[List[Dict], List[Dict]]:
         """Parse CSV file"""
         try:
-            df = pd.read_csv(file_path)
-            return self._process_dataframe(df, "Sheet1", file_path)
+            # Try UTF-8 first
+            df = pd.read_csv(file_path, encoding='utf-8')
+        except UnicodeDecodeError:
+            logger.warning(f"UTF-8 decode failed for {file_path}, trying latin-1")
+            try:
+                df = pd.read_csv(file_path, encoding='latin-1')
+            except Exception as e:
+                logger.error(f"CSV parsing failed for {file_path}: {e}")
+                raise ValueError(f"Unable to parse CSV file: {e}")
+        except pd.errors.ParserError as e:
+            logger.error(f"CSV format error in {file_path}: {e}")
+            raise ValueError(f"Invalid CSV format: {e}")
         except Exception as e:
-            logger.error(f"Error parsing CSV {file_path}: {e}")
+            logger.error(f"Unexpected error parsing CSV {file_path}: {e}")
             raise
+
+        return self._process_dataframe(df, "Sheet1", file_path)
 
     def _parse_excel(self, file_path: str) -> Tuple[List[Dict], List[Dict]]:
         """Parse Excel file with multiple sheets"""
@@ -65,19 +92,23 @@ class ExcelProcessor:
 
         try:
             xlsx = pd.ExcelFile(file_path)
+        except Exception as e:
+            logger.error(f"Failed to open Excel file {file_path}: {e}")
+            raise ValueError(f"Unable to open Excel file: {e}")
 
-            for sheet_name in xlsx.sheet_names:
+        for sheet_name in xlsx.sheet_names:
+            try:
                 df = pd.read_excel(xlsx, sheet_name=sheet_name)
                 if df.empty:
+                    logger.debug(f"Skipping empty sheet: {sheet_name}")
                     continue
 
                 structured_data, chunks = self._process_dataframe(df, sheet_name, file_path)
                 all_structured_data.extend(structured_data)
                 all_chunks.extend(chunks)
-
-        except Exception as e:
-            logger.error(f"Error parsing Excel {file_path}: {e}")
-            raise
+            except Exception as e:
+                logger.warning(f"Error processing sheet {sheet_name}: {e}")
+                continue
 
         return all_structured_data, all_chunks
 
@@ -183,7 +214,7 @@ class ExcelProcessor:
             structured_data.append({
                 'equipment_tag': equipment_tag,
                 'data_type': data_type,
-                'data_json': json.dumps(row_data),
+                'data_json': json.dumps(row_data, default=str),
                 'source_location': f"{sheet_name}:Row {idx + 2}"  # +2 for 1-indexed + header
             })
 
@@ -232,7 +263,7 @@ class ExcelProcessor:
                 'chunk_index': len(chunks),
                 'content': content,
                 'source_location': f"{sheet_name}:Rows {start_idx + 2}-{end_idx + 1}",
-                'equipment_tags': json.dumps(equipment_tags) if equipment_tags else None
+                'equipment_tags': json.dumps(equipment_tags, default=str) if equipment_tags else None
             })
 
         return chunks
