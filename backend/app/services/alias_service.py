@@ -100,12 +100,15 @@ class AliasService:
         eq_id, confidence = self.fuzzy_match(tag, equipment_list)
         if eq_id:
             equipment = db.query(Equipment).filter(Equipment.id == eq_id).first()
-            return (equipment, confidence)
+            if equipment:
+                return (equipment, confidence)
+            else:
+                logger.warning(f"Equipment ID {eq_id} from fuzzy match no longer exists")
 
         return (None, confidence)
 
     def create_alias(self, db: Session, equipment_id: int, alias: str,
-                     source: str = None, confidence: float = None) -> EquipmentAlias:
+                     source: str = None, confidence: float = None) -> Optional[EquipmentAlias]:
         """Create an equipment alias
 
         Args:
@@ -116,8 +119,15 @@ class AliasService:
             confidence: Match confidence
 
         Returns:
-            Created EquipmentAlias
+            Created EquipmentAlias or None if creation failed
         """
+        # Validate alias
+        if not alias or not alias.strip():
+            logger.warning(f"Cannot create empty alias for equipment ID {equipment_id}")
+            return None
+
+        alias = alias.strip()  # Normalize whitespace
+
         # Check if alias already exists for this equipment
         existing = db.query(EquipmentAlias).filter(
             EquipmentAlias.equipment_id == equipment_id,
@@ -127,18 +137,23 @@ class AliasService:
         if existing:
             return existing
 
-        new_alias = EquipmentAlias(
-            equipment_id=equipment_id,
-            alias=alias,
-            source=source,
-            confidence=confidence
-        )
-        db.add(new_alias)
-        db.commit()
-        db.refresh(new_alias)
+        try:
+            new_alias = EquipmentAlias(
+                equipment_id=equipment_id,
+                alias=alias,
+                source=source,
+                confidence=confidence
+            )
+            db.add(new_alias)
+            db.commit()
+            db.refresh(new_alias)
 
-        logger.info(f"Created alias '{alias}' for equipment ID {equipment_id}")
-        return new_alias
+            logger.info(f"Created alias '{alias}' for equipment ID {equipment_id}")
+            return new_alias
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to create alias '{alias}' for equipment ID {equipment_id}: {e}")
+            return None
 
     def get_equipment_by_alias(self, db: Session, alias: str, project_id: int = None) -> Optional[Equipment]:
         """Get equipment by its alias
