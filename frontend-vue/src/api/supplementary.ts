@@ -1,6 +1,4 @@
-import axios from 'axios'
-
-const API_BASE = '/api'
+import api from './index'
 
 // Types
 export type ContentCategory =
@@ -53,8 +51,8 @@ export async function uploadSupplementary(
     formData.append('content_category', contentCategory)
   }
 
-  const response = await axios.post<SupplementaryDocument>(
-    `${API_BASE}/projects/${projectId}/supplementary`,
+  const response = await api.post<SupplementaryDocument>(
+    `/api/projects/${projectId}/supplementary`,
     formData,
     {
       headers: {
@@ -68,8 +66,8 @@ export async function uploadSupplementary(
 export async function getSupplementaryDocuments(
   projectId: number
 ): Promise<SupplementaryDocument[]> {
-  const response = await axios.get<SupplementaryDocument[]>(
-    `${API_BASE}/projects/${projectId}/supplementary`
+  const response = await api.get<SupplementaryDocument[]>(
+    `/api/projects/${projectId}/supplementary`
   )
   return response.data
 }
@@ -77,8 +75,8 @@ export async function getSupplementaryDocuments(
 export async function getSupplementaryDocument(
   documentId: number
 ): Promise<SupplementaryDocument> {
-  const response = await axios.get<SupplementaryDocument>(
-    `${API_BASE}/supplementary/${documentId}`
+  const response = await api.get<SupplementaryDocument>(
+    `/api/supplementary/${documentId}`
   )
   return response.data
 }
@@ -86,14 +84,14 @@ export async function getSupplementaryDocument(
 export async function deleteSupplementary(
   documentId: number
 ): Promise<void> {
-  await axios.delete(`${API_BASE}/supplementary/${documentId}`)
+  await api.delete(`/api/supplementary/${documentId}`)
 }
 
 export async function reprocessSupplementary(
   documentId: number
 ): Promise<{ message: string }> {
-  const response = await axios.post<{ message: string }>(
-    `${API_BASE}/supplementary/${documentId}/reprocess`
+  const response = await api.post<{ message: string }>(
+    `/api/supplementary/${documentId}/reprocess`
   )
   return response.data
 }
@@ -101,8 +99,8 @@ export async function reprocessSupplementary(
 export async function getEquipmentProfile(
   tag: string
 ): Promise<EquipmentProfile> {
-  const response = await axios.get<EquipmentProfile>(
-    `${API_BASE}/equipment/${encodeURIComponent(tag)}/profile`
+  const response = await api.get<EquipmentProfile>(
+    `/api/equipment/${encodeURIComponent(tag)}/profile`
   )
   return response.data
 }
@@ -110,8 +108,8 @@ export async function getEquipmentProfile(
 export async function getEquipmentAliases(
   tag: string
 ): Promise<EquipmentAlias[]> {
-  const response = await axios.get<EquipmentAlias[]>(
-    `${API_BASE}/equipment/${encodeURIComponent(tag)}/aliases`
+  const response = await api.get<EquipmentAlias[]>(
+    `/api/equipment/${encodeURIComponent(tag)}/aliases`
   )
   return response.data
 }
@@ -122,8 +120,8 @@ export async function addEquipmentAlias(
   source?: string,
   confidence?: number
 ): Promise<EquipmentAlias> {
-  const response = await axios.post<EquipmentAlias>(
-    `${API_BASE}/equipment/${encodeURIComponent(tag)}/aliases`,
+  const response = await api.post<EquipmentAlias>(
+    `/api/equipment/${encodeURIComponent(tag)}/aliases`,
     { alias, source, confidence }
   )
   return response.data
