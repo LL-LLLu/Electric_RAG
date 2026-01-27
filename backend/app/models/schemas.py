@@ -33,6 +33,99 @@ class QueryType(str, Enum):
     GENERAL = "general"
 
 
+class ContentCategory(str, Enum):
+    IO_LIST = "IO_LIST"
+    EQUIPMENT_SCHEDULE = "EQUIPMENT_SCHEDULE"
+    SEQUENCE_OF_OPERATION = "SEQUENCE_OF_OPERATION"
+    COMMISSIONING = "COMMISSIONING"
+    SUBMITTAL = "SUBMITTAL"
+    OTHER = "OTHER"
+
+
+class DataType(str, Enum):
+    IO_POINT = "IO_POINT"
+    SPECIFICATION = "SPECIFICATION"
+    ALARM = "ALARM"
+    SCHEDULE_ENTRY = "SCHEDULE_ENTRY"
+    SEQUENCE = "SEQUENCE"
+
+
+# Supplementary Document Schemas
+class SupplementaryDocumentCreate(BaseModel):
+    content_category: Optional[ContentCategory] = None
+
+
+class SupplementaryDocumentResponse(BaseModel):
+    id: int
+    project_id: int
+    filename: str
+    original_filename: str
+    document_type: str  # EXCEL, WORD
+    content_category: Optional[str] = None
+    file_size: Optional[int] = None
+    processed: int
+    processing_error: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SupplementaryChunkResponse(BaseModel):
+    id: int
+    document_id: int
+    chunk_index: int
+    content: str
+    source_location: Optional[str] = None
+    equipment_tags: Optional[str] = None  # JSON string
+
+    class Config:
+        from_attributes = True
+
+
+class EquipmentDataResponse(BaseModel):
+    id: int
+    document_id: int
+    equipment_tag: str
+    equipment_id: Optional[int] = None
+    match_confidence: Optional[float] = None
+    data_type: str
+    data_json: str
+    source_location: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class EquipmentAliasCreate(BaseModel):
+    alias: str
+    source: Optional[str] = None
+    confidence: Optional[float] = None
+
+
+class EquipmentAliasResponse(BaseModel):
+    id: int
+    equipment_id: int
+    alias: str
+    source: Optional[str] = None
+    confidence: Optional[float] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class EquipmentProfileResponse(BaseModel):
+    id: int
+    equipment_id: int
+    profile_json: str
+    last_updated: datetime
+
+    class Config:
+        from_attributes = True
+
+
 # Project Schemas
 class ProjectBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
