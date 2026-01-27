@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeftIcon,
@@ -32,10 +32,8 @@ const supplementaryCount = ref(0)
 // State
 const loading = ref(false)
 const uploading = ref(false)
-const uploadProgress = ref(0)
 const error = ref<string | null>(null)
 const documents = ref<Document[]>([])
-const selectedDocument = ref<Document | null>(null)
 const showDeleteConfirm = ref(false)
 const documentToDelete = ref<Document | null>(null)
 const showMoveModal = ref(false)
@@ -111,7 +109,6 @@ async function handleFileSelect(event: Event) {
   }
 
   uploading.value = true
-  uploadProgress.value = 0
   error.value = null
 
   try {
@@ -141,7 +138,6 @@ async function handleFileSelect(event: Event) {
     error.value = e instanceof Error ? e.message : 'Failed to upload document'
   } finally {
     uploading.value = false
-    uploadProgress.value = 0
     // Reset input
     if (input) input.value = ''
   }
@@ -226,11 +222,6 @@ async function moveDocument() {
   }
 }
 
-// Select document for detail view
-function selectDocument(doc: Document) {
-  selectedDocument.value = selectedDocument.value?.id === doc.id ? null : doc
-}
-
 // Add existing unassigned documents to this project
 async function openAddExistingModal() {
   selectedDocumentsToAdd.value = []
@@ -288,20 +279,28 @@ function goBack() {
   router.push({ name: 'project-dashboard', params: { id: projectId.value } })
 }
 
+// Polling interval for processing documents
+let pollInterval: ReturnType<typeof setInterval> | null = null
+
 // Initialize
 onMounted(() => {
   loadData()
 
   // Poll for updates while documents are processing
-  const pollInterval = setInterval(async () => {
+  pollInterval = setInterval(async () => {
     const hasProcessing = documents.value.some((d) => d.processed === 0 || d.processed === 1)
     if (hasProcessing) {
       documents.value = await documentsApi.listByProject(projectId.value)
     }
   }, 5000)
+})
 
-  // Clean up
-  return () => clearInterval(pollInterval)
+// Clean up polling interval on unmount
+onUnmounted(() => {
+  if (pollInterval) {
+    clearInterval(pollInterval)
+    pollInterval = null
+  }
 })
 </script>
 
@@ -426,7 +425,7 @@ onMounted(() => {
           >
             <DocumentCard
               :document="doc"
-              @select="selectDocument"
+              @select="viewDocument"
             />
 
             <!-- Action buttons overlay -->
