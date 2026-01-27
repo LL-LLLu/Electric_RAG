@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import documents, search, equipment, health, projects
+from app.api.routes import documents, search, equipment, health, projects, conversations, supplementary
 from app.db.session import init_db
 from app.config import settings
 
@@ -46,6 +46,8 @@ app.include_router(projects.router, prefix="/api/projects", tags=["Projects"])
 app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
 app.include_router(search.router, prefix="/api/search", tags=["Search"])
 app.include_router(equipment.router, prefix="/api/equipment", tags=["Equipment"])
+app.include_router(conversations.router, prefix="/api", tags=["Conversations"])
+app.include_router(supplementary.router, prefix="/api", tags=["Supplementary"])
 
 
 @app.get("/")
