@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Float, Index
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Float, Index, UniqueConstraint
 from sqlalchemy.orm import relationship, declarative_base
 from pgvector.sqlalchemy import Vector
 
@@ -25,6 +25,7 @@ class Project(Base):
     documents = relationship("Document", back_populates="project", cascade="all, delete-orphan")
     equipment = relationship("Equipment", back_populates="project")
     conversations = relationship("Conversation", back_populates="project", cascade="all, delete-orphan")
+    supplementary_documents = relationship("SupplementaryDocument", back_populates="project", cascade="all, delete-orphan")
 
 
 class Conversation(Base):
@@ -141,6 +142,9 @@ class Equipment(Base):
         foreign_keys="EquipmentRelationship.target_id",
         back_populates="target"
     )
+    equipment_data_entries = relationship("EquipmentData", back_populates="equipment")
+    aliases = relationship("EquipmentAlias", back_populates="equipment", cascade="all, delete-orphan")
+    profile = relationship("EquipmentProfile", back_populates="equipment", uselist=False, cascade="all, delete-orphan")
 
     __table_args__ = (
         Index('idx_equipment_project_tag', 'project_id', 'tag', unique=True),
@@ -260,3 +264,90 @@ class SearchLog(Base):
     response_time_ms = Column(Integer)
     user_feedback = Column(Integer)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SupplementaryDocument(Base):
+    """Represents a supplementary document (Excel, Word) uploaded to a project"""
+    __tablename__ = "supplementary_documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    filename = Column(String(255), nullable=False)
+    original_filename = Column(String(255), nullable=False)
+    document_type = Column(String(20), nullable=False)  # EXCEL, WORD
+    content_category = Column(String(50))  # IO_LIST, EQUIPMENT_SCHEDULE, etc.
+    file_path = Column(String(500), nullable=False)
+    file_size = Column(Integer)
+    processed = Column(Integer, default=0)  # 0=pending, 1=processing, 2=done, -1=error
+    processing_error = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    project = relationship("Project", back_populates="supplementary_documents")
+    chunks = relationship("SupplementaryChunk", back_populates="document", cascade="all, delete-orphan")
+    equipment_data = relationship("EquipmentData", back_populates="document", cascade="all, delete-orphan")
+
+
+class SupplementaryChunk(Base):
+    """Represents a searchable chunk from a supplementary document"""
+    __tablename__ = "supplementary_chunks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    document_id = Column(Integer, ForeignKey("supplementary_documents.id", ondelete="CASCADE"), nullable=False)
+    chunk_index = Column(Integer, nullable=False)
+    content = Column(Text, nullable=False)
+    source_location = Column(String(200))  # "Sheet1:A1-F20" or "Section 3.2"
+    equipment_tags = Column(Text)  # JSON array
+    embedding = Column(Vector(384))
+
+    # Relationships
+    document = relationship("SupplementaryDocument", back_populates="chunks")
+
+
+class EquipmentData(Base):
+    """Structured equipment data extracted from supplementary documents"""
+    __tablename__ = "equipment_data"
+
+    id = Column(Integer, primary_key=True, index=True)
+    document_id = Column(Integer, ForeignKey("supplementary_documents.id", ondelete="CASCADE"), nullable=False)
+    equipment_tag = Column(String(100), nullable=False, index=True)
+    equipment_id = Column(Integer, ForeignKey("equipment.id", ondelete="SET NULL"))
+    match_confidence = Column(Float)
+    data_type = Column(String(50), nullable=False)  # IO_POINT, SPECIFICATION, etc.
+    data_json = Column(Text, nullable=False)
+    source_location = Column(String(200))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    document = relationship("SupplementaryDocument", back_populates="equipment_data")
+    equipment = relationship("Equipment", back_populates="equipment_data_entries")
+
+
+class EquipmentAlias(Base):
+    """Alternative names/tags for equipment to improve matching"""
+    __tablename__ = "equipment_aliases"
+
+    id = Column(Integer, primary_key=True, index=True)
+    equipment_id = Column(Integer, ForeignKey("equipment.id", ondelete="CASCADE"), nullable=False)
+    alias = Column(String(100), nullable=False, index=True)
+    source = Column(String(255))
+    confidence = Column(Float)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    equipment = relationship("Equipment", back_populates="aliases")
+
+    __table_args__ = (UniqueConstraint('equipment_id', 'alias', name='uq_equipment_alias'),)
+
+
+class EquipmentProfile(Base):
+    """Consolidated equipment profile aggregating all data sources"""
+    __tablename__ = "equipment_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    equipment_id = Column(Integer, ForeignKey("equipment.id", ondelete="CASCADE"), nullable=False, unique=True)
+    profile_json = Column(Text, nullable=False)
+    last_updated = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    equipment = relationship("Equipment", back_populates="profile")
