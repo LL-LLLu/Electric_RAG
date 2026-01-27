@@ -98,49 +98,75 @@ function triggerUpload() {
   fileInputRef.value?.click()
 }
 
+// Supported file extensions for drawings
+const SUPPORTED_EXTENSIONS = ['.pdf', '.png', '.jpg', '.jpeg', '.tiff', '.tif', '.bmp', '.gif', '.webp', '.heic', '.heif']
+
+function isSupportedFile(filename: string): boolean {
+  const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'))
+  return SUPPORTED_EXTENSIONS.includes(ext)
+}
+
+// Upload progress tracking
+const uploadProgress = ref({ current: 0, total: 0 })
+
 async function handleFileSelect(event: Event) {
   const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
+  const files = input.files
+  if (!files || files.length === 0) return
 
-  if (!file.name.toLowerCase().endsWith('.pdf')) {
-    error.value = 'Only PDF files are supported'
+  // Validate all files first
+  const unsupportedFiles = Array.from(files).filter(f => !isSupportedFile(f.name))
+  if (unsupportedFiles.length > 0) {
+    error.value = `Unsupported file type(s): ${unsupportedFiles.map(f => f.name).join(', ')}. Supported formats: PDF, PNG, JPG, TIFF, BMP, GIF, WEBP, HEIC`
     return
   }
 
   uploading.value = true
   error.value = null
+  uploadProgress.value = { current: 0, total: files.length }
 
-  try {
-    // Use the project-scoped upload endpoint
-    const formData = new FormData()
-    formData.append('file', file)
+  const errors: string[] = []
 
-    const response = await fetch(
-      `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/documents/project/${projectId.value}/upload`,
-      {
-        method: 'POST',
-        body: formData,
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i]
+    uploadProgress.value.current = i + 1
+
+    try {
+      // Use the project-scoped upload endpoint
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/documents/project/${projectId.value}/upload`,
+        {
+          method: 'POST',
+          body: formData,
+        }
+      )
+
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.detail || 'Upload failed')
       }
-    )
-
-    if (!response.ok) {
-      const data = await response.json()
-      throw new Error(data.detail || 'Upload failed')
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : 'Upload failed'
+      errors.push(`${file.name}: ${errorMsg}`)
     }
-
-    // Refresh documents list
-    await loadData()
-
-    // Refresh project stats
-    await projectsStore.fetchProject(projectId.value)
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to upload document'
-  } finally {
-    uploading.value = false
-    // Reset input
-    if (input) input.value = ''
   }
+
+  // Refresh documents list and project stats
+  await loadData()
+  await projectsStore.fetchProject(projectId.value)
+
+  if (errors.length > 0) {
+    error.value = errors.length === 1
+      ? errors[0]
+      : `${errors.length} files failed to upload`
+  }
+
+  uploading.value = false
+  // Reset input
+  if (input) input.value = ''
 }
 
 // Retry processing
@@ -343,14 +369,15 @@ onUnmounted(() => {
             >
               <CloudArrowUpIcon v-if="!uploading" class="h-5 w-5 mr-2" />
               <LoadingSpinner v-else size="small" class="mr-2" />
-              {{ uploading ? 'Uploading...' : 'Upload Document' }}
+              {{ uploading ? `Uploading ${uploadProgress.current}/${uploadProgress.total}...` : 'Upload Documents' }}
             </button>
           </div>
           <input
             ref="fileInputRef"
             type="file"
-            accept=".pdf"
+            accept=".pdf,.png,.jpg,.jpeg,.tiff,.tif,.bmp,.gif,.webp,.heic,.heif,image/*"
             class="hidden"
+            multiple
             @change="handleFileSelect"
           />
         </div>

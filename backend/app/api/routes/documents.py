@@ -10,11 +10,25 @@ from PIL import Image
 
 from app.db.session import get_db, SessionLocal
 from app.models.database import Document, Page, Equipment, Project
-from app.models.schemas import DocumentResponse, DocumentDetail, UploadResponse
+from app.models.schemas import DocumentResponse, DocumentDetail, UploadResponse, DocumentProjectAssign
 from app.services.document_processor import document_processor
+from app.services.ocr_service import ocr_service
 from app.config import settings
 
 router = APIRouter()
+
+# Supported file extensions
+SUPPORTED_EXTENSIONS = {'.pdf', '.png', '.jpg', '.jpeg', '.tiff', '.tif', '.bmp', '.gif', '.webp', '.heic', '.heif'}
+
+
+def get_file_extension(filename: str) -> str:
+    """Get lowercase file extension"""
+    return os.path.splitext(filename.lower())[1]
+
+
+def is_supported_file(filename: str) -> bool:
+    """Check if file type is supported"""
+    return get_file_extension(filename) in SUPPORTED_EXTENSIONS
 
 
 def process_document_task(document_id: int):
@@ -32,13 +46,17 @@ async def upload_document(
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
-    """Upload a new electrical drawing PDF"""
+    """Upload a new electrical drawing (PDF or image)"""
 
-    if not file.filename.lower().endswith('.pdf'):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported")
+    if not is_supported_file(file.filename):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type. Supported formats: PDF, PNG, JPG, JPEG, TIFF, BMP, GIF, WEBP, HEIC"
+        )
 
     file_id = str(uuid.uuid4())
-    filename = f"{file_id}.pdf"
+    ext = get_file_extension(file.filename)
+    filename = f"{file_id}{ext}"
     file_path = os.path.join(settings.upload_dir, filename)
 
     os.makedirs(settings.upload_dir, exist_ok=True)
@@ -76,18 +94,22 @@ async def upload_document_to_project(
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
-    """Upload a new electrical drawing PDF to a specific project"""
+    """Upload a new electrical drawing (PDF or image) to a specific project"""
 
     # Verify project exists
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    if not file.filename.lower().endswith('.pdf'):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported")
+    if not is_supported_file(file.filename):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type. Supported formats: PDF, PNG, JPG, JPEG, TIFF, BMP, GIF, WEBP, HEIC"
+        )
 
     file_id = str(uuid.uuid4())
-    filename = f"{file_id}.pdf"
+    ext = get_file_extension(file.filename)
+    filename = f"{file_id}{ext}"
     file_path = os.path.join(settings.upload_dir, filename)
 
     os.makedirs(settings.upload_dir, exist_ok=True)
@@ -134,6 +156,19 @@ async def list_project_documents(
 
     documents = db.query(Document).filter(
         Document.project_id == project_id
+    ).offset(skip).limit(limit).all()
+    return documents
+
+
+@router.get("/unassigned", response_model=List[DocumentResponse])
+async def list_unassigned_documents(
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db)
+):
+    """List all documents not assigned to any project"""
+    documents = db.query(Document).filter(
+        Document.project_id.is_(None)
     ).offset(skip).limit(limit).all()
     return documents
 
@@ -224,6 +259,37 @@ async def delete_document(document_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to delete document: {str(e)}")
+
+
+@router.patch("/{document_id}/project", response_model=DocumentResponse)
+async def assign_document_to_project(
+    document_id: int,
+    data: DocumentProjectAssign,
+    db: Session = Depends(get_db)
+):
+    """Assign or reassign a document to a project"""
+    document = db.query(Document).filter(Document.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # If project_id is provided, verify the project exists
+    if data.project_id is not None:
+        project = db.query(Project).filter(Project.id == data.project_id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+    # Update the document's project
+    document.project_id = data.project_id
+
+    # Also update project_id on all equipment associated with this document
+    db.query(Equipment).filter(Equipment.document_id == document_id).update(
+        {Equipment.project_id: data.project_id}
+    )
+
+    db.commit()
+    db.refresh(document)
+
+    return document
 
 
 @router.post("/{document_id}/retry")
