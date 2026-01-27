@@ -196,7 +196,7 @@ class RAGService:
         parts.append("=== RELEVANT DOCUMENT EXCERPTS ===")
         for i, result in enumerate(results, 1):
             # Differentiate between PDF pages and supplementary chunks
-            source_type = "📄" if result.match_type in ["exact", "semantic", "keyword", "text_search"] else "📊"
+            source_type = "[PDF]" if result.match_type in ["exact", "semantic", "keyword", "text_search"] else "[SUPP]"
             parts.append(f"\n[Source {i}] {source_type} Document: {result.document.filename}, Page {result.page_number}")
 
             if result.source_location:
@@ -238,8 +238,8 @@ Your responsibilities:
 7. If information is not found in the provided context, say so clearly
 
 IMPORTANT - Source Types:
-- 📄 PDF Drawings: Primary source for equipment locations, wiring, and connections
-- 📊 Supplementary Documents: Excel schedules (IO lists, equipment schedules) and Word docs (sequences of operation, specs)
+- [PDF] Drawings: Primary source for equipment locations, wiring, and connections
+- [SUPP] Supplementary Documents: Excel schedules (IO lists, equipment schedules) and Word docs (sequences of operation, specs)
 
 For relationship questions (what feeds X, what controls Y, etc.):
 - Use the EQUIPMENT GRAPH section to provide detailed answers
