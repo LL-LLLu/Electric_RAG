@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import re
 import google.generativeai as genai
 from PIL import Image
 from typing import Dict, Any
@@ -47,11 +48,20 @@ class GeminiVisionClient:
         try:
             response = self.model.generate_content([prompt, image])
             text = response.text
+            
             # Clean json
+            # First check for markdown code blocks
+            match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+            if match:
+                json_str = match.group(1)
+                return json.loads(json_str)
+            
+            # Fallback to finding outermost brackets
             start = text.find('{')
             end = text.rfind('}') + 1
             if start != -1 and end != -1:
                 return json.loads(text[start:end])
+            
             return {}
         except Exception as e:
             logger.error(f"Gemini vision analysis failed: {e}")
