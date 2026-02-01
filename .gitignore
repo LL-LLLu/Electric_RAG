@@ -52,3 +52,4 @@ build/
 
 # Claude
 .claude/
+.worktrees/
