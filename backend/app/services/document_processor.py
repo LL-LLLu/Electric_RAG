@@ -7,6 +7,8 @@ from app.services.ocr_service import ocr_service
 from app.services.extraction_service import extraction_service, ExtractedEquipment
 from app.services.embedding_service import embedding_service
 from app.services.ai_analysis_service import ai_analysis_service
+from app.services.vision_extraction_service import vision_extraction_service
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +88,22 @@ class DocumentProcessor:
                         all_equipment[eq.tag] = eq
 
                 equipment_tags = [eq.tag for eq in equipment_list]
+
+                # Vision Extraction
+                try:
+                    with Image.open(page_data["image_path"]) as page_image:
+                        vision_rels = vision_extraction_service.process_page(
+                            page_image,
+                            [{"tag": eq.tag, "bbox": eq.bbox} for eq in equipment_list if eq.bbox]
+                        )
+                        for rel in vision_rels:
+                            rel["document_id"] = document_id
+                            rel["page_number"] = page_num
+                        all_relationships.extend(vision_rels)
+                        if vision_rels:
+                            logger.info(f"[PIPELINE] Page {page_num}: Vision found {len(vision_rels)} relationships")
+                except Exception as e:
+                    logger.error(f"Vision extraction failed for page {page_num}: {e}")
 
                 # Generate embedding using AI analysis + OCR text for better semantic search
                 enhanced_text = f"{ai_result.get('analysis', '')} {page_data['ocr_text']}"
