@@ -92,6 +92,7 @@ class DocumentProcessor:
                 # Vision Extraction
                 try:
                     with Image.open(page_data["image_path"]) as page_image:
+                        page_image.load()
                         vision_rels = vision_extraction_service.process_page(
                             page_image,
                             [{"tag": eq.tag, "bbox": eq.bbox} for eq in equipment_list if eq.bbox]
