@@ -375,6 +375,14 @@ Your task:
 4. Structure the answer clearly with sections if appropriate
 5. Be specific with technical details (voltages, wire sizes, signal types, etc.)
 
+FORMATTING RULES (STRICT):
+1. **Executive Summary:** Start with a bold (**Answer:**) 1-sentence direct answer.
+2. **Sections:** Group findings into Markdown sections (e.g., ### Specifications, ### Relationships, ### Control Logic).
+3. **Bullets:** Use bullet points (-) for all lists.
+4. **Bolding:** **Bold** equipment tags and key values.
+5. **Discrepancies:** If agents disagree, create a "### Discrepancies" section.
+6. **Sources:** List key sources at the end of each section or in a dedicated References section.
+
 Always include document and page references for traceability.
 If agents found conflicting information, note the discrepancy and explain which source is more reliable."""
 
