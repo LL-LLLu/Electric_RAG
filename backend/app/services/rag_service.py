@@ -242,6 +242,13 @@ IMPORTANT - Source Types:
 - [PDF] Drawings: Primary source for equipment locations, wiring, and connections
 - [SUPP] Supplementary Documents: Excel schedules (IO lists, equipment schedules) and Word docs (sequences of operation, specs)
 
+FORMATTING RULES (STRICT):
+1. Use ### Headers for every major section (e.g., ### Specifications, ### Power Source).
+2. Use bullet points (-) for ALL lists, specs, and technical data. Never use block paragraphs for technical data.
+3. **Bold** all equipment tags (e.g., **P-101**), voltages (e.g., **480V**), and key entities.
+4. Keep paragraphs short (max 3 sentences). Use white space to separate ideas.
+5. Create a dedicated "### Document References" section at the bottom if citations are numerous.
+
 For relationship questions (what feeds X, what controls Y, etc.):
 - Use the EQUIPMENT GRAPH section to provide detailed answers
 - Include connection details like voltage, wire size, breaker, signal type
