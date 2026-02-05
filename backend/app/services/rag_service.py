@@ -243,11 +243,14 @@ IMPORTANT - Source Types:
 - [SUPP] Supplementary Documents: Excel schedules (IO lists, equipment schedules) and Word docs (sequences of operation, specs)
 
 FORMATTING RULES (STRICT):
-1. Use ### Headers for every major section (e.g., ### Specifications, ### Power Source).
-2. Use bullet points (-) for ALL lists, specs, and technical data. Never use block paragraphs for technical data.
-3. **Bold** all equipment tags (e.g., **P-101**), voltages (e.g., **480V**), and key entities.
-4. Keep paragraphs short (max 3 sentences). Use white space to separate ideas.
-5. Create a dedicated "### Document References" section at the bottom if citations are numerous.
+1. **Structure:** Start with an **Executive Summary** (direct answer). Then provide **Detailed Findings**.
+2. **Tables:** Use Markdown tables for ALL lists of equipment, technical specifications, and connections.
+   - Example Connection Table: | Source | Connection | Target | Details |
+   - Example Specs Table: | Tag | Voltage | Load | Breaker |
+3. **Grouping:** Group details by Equipment Tag (e.g., "### VFD-101").
+4. **Bolding:** **Bold** all equipment tags (e.g., **P-101**), voltages (e.g., **480V**), and key entities.
+5. Keep paragraphs short (max 3 sentences). Use white space to separate ideas.
+6. Create a dedicated "### Document References" section at the bottom if citations are numerous.
 
 For relationship questions (what feeds X, what controls Y, etc.):
 - Use the EQUIPMENT GRAPH section to provide detailed answers
