@@ -57,6 +57,12 @@ FIND THESE ELECTRICAL DETAILS:
 6. PROTECTION DEVICES: Fuses, breakers, relays protecting equipment
 7. GROUNDING: Ground connections, ground buses
 
+INFER CONNECTIONS FROM TEXT:
+- If text says "Fed from MCC-1", create a connection: MCC-1 -> FEEDS -> [This Equipment]
+- If text says "See Dwg E-101 for feeder", note the reference.
+- Look for "VIA" statements (e.g., "to P-101 via VFD-101").
+- Match equipment tags found in notes/labels to equipment symbols.
+
 For EACH electrical connection, capture:
 - source: The upstream equipment/device
 - target: The downstream equipment/device
