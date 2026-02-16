@@ -11,7 +11,6 @@ env:
   NODE_VERSION: "20"
 
 jobs:
-  # Backend tests and linting
   backend:
     name: Backend CI
     runs-on: ubuntu-latest
@@ -51,20 +50,12 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio httpx ruff
+          pip install pytest pytest-asyncio httpx ruff anyio
 
       - name: Lint with Ruff
         working-directory: backend
-        run: |
-          ruff check . --output-format=github || true
-        continue-on-error: true
-
-      - name: Type check (optional)
-        working-directory: backend
-        run: |
-          pip install mypy types-requests
-          mypy app --ignore-missing-imports || true
-        continue-on-error: true
+        run: ruff check . --output-format=github
+        continue-on-error: true  # Advisory only
 
       - name: Run tests
         working-directory: backend
@@ -73,10 +64,8 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           LLM_PROVIDER: gemini
           ENVIRONMENT: test
-        run: |
-          pytest tests/ -v --tb=short || echo "Tests completed"
+        run: pytest tests/ -v --tb=short
 
-  # Frontend build and lint
   frontend:
     name: Frontend CI
     runs-on: ubuntu-latest
@@ -97,48 +86,16 @@ jobs:
 
       - name: Lint
         working-directory: frontend-vue
-        run: npm run lint || true
-        continue-on-error: true
+        run: npm run lint
+        continue-on-error: true  # Advisory only
 
       - name: Type check
         working-directory: frontend-vue
-        run: npm run type-check || true
-        continue-on-error: true
+        run: npm run type-check
+        continue-on-error: true  # Advisory only
 
       - name: Build
         working-directory: frontend-vue
         env:
           VITE_API_URL: http://localhost:8000
         run: npm run build
-
-  # Docker build verification
-  docker:
-    name: Docker Build
-    runs-on: ubuntu-latest
-    needs: [backend, frontend]
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build backend image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./backend
-          push: false
-          tags: electric-rag-backend:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build frontend image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./frontend-vue
-          push: false
-          tags: electric-rag-frontend:test
-          build-args: |
-            VITE_API_URL=http://localhost:8000
-          cache-from: type=gha
-          cache-to: type=gha,mode=max

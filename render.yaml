@@ -36,7 +36,7 @@ services:
       name: uploads
       mountPath: /app/uploads
       sizeGB: 1
-    autoDeploy: true
+    autoDeploy: false  # Deployed via GitHub Actions after CI passes
 
   # Frontend
   - type: web
@@ -49,4 +49,4 @@ services:
     envVars:
       - key: PORT
         value: "10000"
-    autoDeploy: true
+    autoDeploy: false  # Deployed via GitHub Actions after CI passes
