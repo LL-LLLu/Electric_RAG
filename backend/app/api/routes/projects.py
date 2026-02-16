@@ -7,13 +7,14 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.db.session import get_db
+from app.api.auth import require_api_key
 from app.models.database import Project, Document, Equipment, Conversation, Page
 from app.models.schemas import (
     ProjectCreate, ProjectUpdate, ProjectResponse, ProjectDetail, ProjectStats
 )
 from app.config import settings
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_api_key)])
 
 
 @router.post("/", response_model=ProjectResponse)

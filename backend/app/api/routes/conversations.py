@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.api.auth import require_api_key
 from app.models.database import Project, Conversation, Message
 from app.models.schemas import (
     ConversationCreate, ConversationUpdate, ConversationResponse,
@@ -13,7 +14,7 @@ from app.services.rag_service import rag_service
 from app.services.multi_agent_search_service import multi_agent_search_service
 from app.services.search_service import search_service
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_api_key)])
 
 
 @router.post("/projects/{project_id}/conversations", response_model=ConversationResponse)

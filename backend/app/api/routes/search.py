@@ -1,17 +1,22 @@
-from fastapi import APIRouter, Depends, Query
+from typing import List
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.api.auth import require_api_key
 from app.models.schemas import SearchRequest, SearchResponse, RAGResponse, MultiAgentResponse
 from app.services.search_service import search_service
 from app.services.rag_service import rag_service
 from app.services.multi_agent_search_service import multi_agent_search_service
+from app.api.limiter import limiter
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_api_key)])
 
 
 @router.get("/", response_model=SearchResponse)
+@limiter.limit("30/minute")
 async def search(
+    request: Request,
     q: str = Query(..., min_length=1, description="Search query"),
     limit: int = Query(10, ge=1, le=50),
     db: Session = Depends(get_db)
@@ -21,17 +26,21 @@ async def search(
 
 
 @router.post("/ask", response_model=RAGResponse)
+@limiter.limit("10/minute")
 async def ask_question(
-    request: SearchRequest,
+    request: Request,
+    search_req: SearchRequest,
     db: Session = Depends(get_db)
 ):
     """Ask a natural language question and get an AI-generated answer"""
-    return rag_service.generate_answer(db, request.query)
+    return rag_service.generate_answer(db, search_req.query)
 
 
 @router.post("/ask/multi-agent")
+@limiter.limit("10/minute")
 async def ask_question_multi_agent(
-    request: SearchRequest,
+    request: Request,
+    search_req: SearchRequest,
     db: Session = Depends(get_db)
 ):
     """
@@ -43,7 +52,7 @@ async def ask_question_multi_agent(
     """
     response = multi_agent_search_service.query(
         db=db,
-        query=request.query,
+        query=search_req.query,
         project_id=None  # Global search
     )
 
@@ -69,8 +78,10 @@ async def ask_question_multi_agent(
 
 
 @router.post("/ask/smart")
+@limiter.limit("10/minute")
 async def ask_question_smart(
-    request: SearchRequest,
+    request: Request,
+    search_req: SearchRequest,
     db: Session = Depends(get_db)
 ):
     """
@@ -81,12 +92,12 @@ async def ask_question_smart(
     - Complex queries: Comprehensive multi-agent response
     """
     # First, do a quick search to analyze result diversity
-    initial_results = search_service.search(db, request.query, limit=20)
+    initial_results = search_service.search(db, search_req.query, limit=20)
 
     # Decide routing
-    if multi_agent_search_service.should_use_multi_agent(request.query, initial_results.results):
+    if multi_agent_search_service.should_use_multi_agent(search_req.query, initial_results.results):
         # Use multi-agent for complex queries
-        response = multi_agent_search_service.query(db, request.query)
+        response = multi_agent_search_service.query(db, search_req.query)
         return {
             "query": response.query,
             "answer": response.answer,
@@ -107,7 +118,7 @@ async def ask_question_smart(
         }
     else:
         # Use single-agent for simple queries
-        rag_response = rag_service.generate_answer(db, request.query)
+        rag_response = rag_service.generate_answer(db, search_req.query)
         return {
             "query": rag_response.query,
             "answer": rag_response.answer,

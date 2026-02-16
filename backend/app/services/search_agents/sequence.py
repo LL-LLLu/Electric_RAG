@@ -135,7 +135,7 @@ class SequenceAgent(SearchAgent):
                         pass
 
                 results.append(AgentSearchResult(
-                    content=chunk.content[:600] if len(chunk.content) > 600 else chunk.content,
+                    content=(chunk.content[:600] if len(chunk.content) > 600 else chunk.content) if chunk.content else "",
                     source_type="supplementary",
                     document_name=doc.original_filename,
                     page_or_location=chunk.source_location or f"Section {chunk.chunk_index + 1}",
@@ -218,11 +218,7 @@ class SequenceAgent(SearchAgent):
         enhanced_query = f"{query} sequence operation start stop mode control logic step procedure"
         query_embedding = embedding_service.generate_embedding(enhanced_query)
 
-        project_filter = ""
-        if project_id:
-            project_filter = "AND sd.project_id = :project_id"
-
-        sql = text(f"""
+        sql = text("""
             SELECT
                 sc.id,
                 sc.document_id,
@@ -243,14 +239,12 @@ class SequenceAgent(SearchAgent):
                 OR sc.content ILIKE '%mode%'
                 OR sc.content ILIKE '%operation%'
             )
-            {project_filter}
+            AND (:project_id IS NULL OR sd.project_id = :project_id)
             ORDER BY sc.embedding <=> CAST(:embedding AS vector)
             LIMIT 5
         """)
 
-        params = {"embedding": str(query_embedding)}
-        if project_id:
-            params["project_id"] = project_id
+        params = {"embedding": str(query_embedding), "project_id": project_id}
 
         result = db.execute(sql, params)
 
@@ -265,7 +259,7 @@ class SequenceAgent(SearchAgent):
                     pass
 
             results.append(AgentSearchResult(
-                content=row.content[:500] if len(row.content) > 500 else row.content,
+                content=(row.content[:500] if len(row.content) > 500 else row.content) if row.content else "",
                 source_type="supplementary",
                 document_name=row.original_filename,
                 page_or_location=row.source_location or "",

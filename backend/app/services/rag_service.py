@@ -78,7 +78,7 @@ class RAGService:
 
         # Search with project scope - use max_per_document=2 for better cross-document diversity
         search_start = time.time()
-        search_response = search_service.search(db, query, limit=limit, project_id=project_id, max_per_document=2)
+        search_response = search_service.search(db, query, limit=limit, project_id=project_id, max_per_document=4)
         logger.info(f"Found {len(search_response.results)} results in {time.time()-search_start:.2f}s")
 
         # Build context with graph data
@@ -98,7 +98,7 @@ class RAGService:
         for result in search_response.results:
             sources.append({
                 "document_id": result.document.id,
-                "document_name": result.document.filename,
+                "document_name": result.document.original_filename,
                 "page_number": result.page_number,
                 "snippet": result.snippet,
                 "bbox": None,  # TODO: Add bbox support when available
@@ -133,7 +133,7 @@ class RAGService:
         # Search with higher limit for better cross-document coverage
         logger.debug("Step 1: Searching documents...")
         search_start = time.time()
-        search_response = search_service.search(db, query, limit=20, max_per_document=2)
+        search_response = search_service.search(db, query, limit=35, max_per_document=8)
         logger.info(f"Found {len(search_response.results)} results in {time.time()-search_start:.2f}s")
         logger.debug(f"Query type: {search_response.query_type}")
 
@@ -141,8 +141,8 @@ class RAGService:
         additional_context = self._get_additional_context(db, query, search_response.query_type)
         additional_context["graph_context"] = graph_context
 
-        # Build context
-        context = self._build_context(search_response.results, additional_context)
+        # Build context with adjacent page expansion for top PDF results
+        context = self._build_context(search_response.results, additional_context, db)
         logger.debug(f"Context built: {len(context)} chars")
 
         # Generate answer
@@ -185,8 +185,8 @@ class RAGService:
 
         return context
 
-    def _build_context(self, results: List[SearchResult], additional_context: dict) -> str:
-        """Build context string for LLM"""
+    def _build_context(self, results: List[SearchResult], additional_context: dict, db: Session = None) -> str:
+        """Build context string for LLM, with adjacent page expansion for top PDF results."""
         parts = []
 
         # Add graph-based context first (most relevant for relationship questions)
@@ -194,11 +194,16 @@ class RAGService:
             parts.append(additional_context["graph_context"])
             parts.append("")
 
+        # Fetch adjacent page text for top 5 PDF results to give LLM more context
+        adjacent_cache = {}
+        if db:
+            adjacent_cache = self._fetch_adjacent_pages(db, results)
+
         parts.append("=== RELEVANT DOCUMENT EXCERPTS ===")
         for i, result in enumerate(results, 1):
             # Differentiate between PDF pages and supplementary chunks
             source_type = "[PDF]" if result.match_type in ["exact", "semantic", "keyword", "text_search"] else "[SUPP]"
-            parts.append(f"\n[Source {i}] {source_type} Document: {result.document.filename}, Page {result.page_number}")
+            parts.append(f"\n[Source {i}] {source_type} Document: {result.document.original_filename}, Page {result.page_number}")
 
             if result.source_location:
                 parts.append(f"Location: {result.source_location}")
@@ -206,6 +211,13 @@ class RAGService:
                 parts.append(f"Equipment: {result.equipment.tag}")
             if result.snippet:
                 parts.append(f"Content: {result.snippet}")
+
+            # Add adjacent page context for top PDF results
+            adj_key = (result.document.id, result.page_number)
+            if adj_key in adjacent_cache:
+                adj_text = adjacent_cache[adj_key]
+                if adj_text:
+                    parts.append(f"Adjacent pages context: {adj_text}")
 
         if "relationships" in additional_context:
             rel = additional_context["relationships"]
@@ -225,9 +237,43 @@ class RAGService:
 
         return "\n".join(parts)
 
+    def _fetch_adjacent_pages(self, db: Session, results: List[SearchResult], top_n: int = 5) -> dict:
+        """Fetch text from adjacent pages (N-1, N+1) for top PDF results.
+
+        Returns dict mapping (document_id, page_number) to adjacent page text.
+        """
+        from app.models.database import Page
+
+        adjacent_cache = {}
+        pdf_types = {"exact", "semantic", "keyword", "text_search"}
+        pdf_results = [r for r in results if r.match_type in pdf_types][:top_n]
+
+        for result in pdf_results:
+            doc_id = result.document.id
+            page_num = result.page_number
+            adj_parts = []
+
+            for adj_page_num in [page_num - 1, page_num + 1]:
+                if adj_page_num < 1:
+                    continue
+                adj_page = db.query(Page).filter(
+                    Page.document_id == doc_id,
+                    Page.page_number == adj_page_num
+                ).first()
+
+                if adj_page and adj_page.ocr_text:
+                    # Truncate to keep context manageable
+                    text = adj_page.ocr_text[:800]
+                    adj_parts.append(f"[Page {adj_page_num}]: {text}")
+
+            if adj_parts:
+                adjacent_cache[(doc_id, page_num)] = " | ".join(adj_parts)
+
+        return adjacent_cache
+
     def _get_system_prompt(self) -> str:
         """Get the system prompt for LLM calls"""
-        return """You are an electrical engineering assistant helping users find information in plant electrical drawings and supplementary documents.
+        return """You are an expert electrical engineering assistant helping users find information in plant electrical drawings and supplementary documents.
 
 Your responsibilities:
 1. Answer questions about equipment location, control relationships, power feeds, and wiring
@@ -243,28 +289,24 @@ IMPORTANT - Source Types:
 - [SUPP] Supplementary Documents: Excel schedules (IO lists, equipment schedules) and Word docs (sequences of operation, specs)
 
 FORMATTING RULES (STRICT):
-1. **Structure:** Start with an **Executive Summary** (direct answer). Then provide **Detailed Findings**.
-2. **Tables:** Use Markdown tables for ALL lists of equipment, technical specifications, and connections.
-   - Example Connection Table: | Source | Connection | Target | Details |
-   - Example Specs Table: | Tag | Voltage | Load | Breaker |
-3. **Grouping:** Group details by Equipment Tag (e.g., "### VFD-101").
-4. **Bolding:** **Bold** all equipment tags (e.g., **P-101**), voltages (e.g., **480V**), and key entities.
-5. Keep paragraphs short (max 3 sentences). Use white space to separate ideas.
-6. Create a dedicated "### Document References" section at the bottom if citations are numerous.
+1. **Executive Summary**: Start with a direct, high-level answer (2-3 sentences).
+2. **Tables**: Use Markdown tables for lists of equipment, technical specifications, and connections.
+   - Connections Table: | Source | Connection Type | Target | Details | Reference |
+   - Specifications Table: | Parameter | Value | Reference |
+3. **Structure**: Use clear headings (##) for different sections (e.g., ## Location, ## Specifications, ## Connections).
+4. **Bolding**: **Bold** all equipment tags, key voltages (e.g., **480V**), and critical values.
+5. **Readability**: Use bullet points for lists. Avoid long paragraphs.
+6. **Citations**: Cite every fact using [Source X] format.
+7. **Document References**: End with a dedicated section listing the full document names and page numbers referenced.
 
 For relationship questions (what feeds X, what controls Y, etc.):
-- Use the EQUIPMENT GRAPH section to provide detailed answers
-- Include connection details like voltage, wire size, breaker, signal type
-- Explain the control/power hierarchy clearly
+- Use a table to show the connections clearly
+- Include specific details like voltage, wire size, breaker, signal type
+- Explain the hierarchy (e.g., "M-1 is fed from MCC-2")
 
 For specification questions (alarms, IO points, setpoints):
-- Prioritize data from Excel IO lists and equipment schedules
-- Include specific values and categories
-
-Format your response clearly with:
-- Direct answer to the question with technical details
-- Specific connection information (voltage, wire size, breaker, signal type)
-- ALL document references (Document: X, Page: Y or Location: Z) from every relevant source"""
+- Use tables to list IO points and Alarms
+- Include columns for Tag, Description, Type/Category, and Source"""
 
     def _get_user_prompt(self, query: str, context: str) -> str:
         """Get the user prompt for LLM calls"""

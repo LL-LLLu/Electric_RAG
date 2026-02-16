@@ -2,20 +2,22 @@ import os
 import shutil
 import uuid
 import io
-from typing import List
-from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, BackgroundTasks, Query
+from typing import List, Optional
+from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, BackgroundTasks, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from PIL import Image
 
 from app.db.session import get_db, SessionLocal
+from app.api.auth import require_api_key
 from app.models.database import Document, Page, Equipment, Project
 from app.models.schemas import DocumentResponse, DocumentDetail, UploadResponse, DocumentProjectAssign
 from app.services.document_processor import document_processor
 from app.services.ocr_service import ocr_service
 from app.config import settings
+from app.api.limiter import limiter
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_api_key)])
 
 # Supported file extensions
 SUPPORTED_EXTENSIONS = {'.pdf', '.png', '.jpg', '.jpeg', '.tiff', '.tif', '.bmp', '.gif', '.webp', '.heic', '.heif'}
@@ -41,7 +43,9 @@ def process_document_task(document_id: int):
 
 
 @router.post("/upload", response_model=UploadResponse)
+@limiter.limit("5/minute")
 async def upload_document(
+    request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
@@ -298,7 +302,7 @@ from typing import List as PyList
 
 class BulkAssignRequest(BaseModel):
     document_ids: PyList[int]
-    project_id: int | None  # None to unassign
+    project_id: Optional[int]  # None to unassign
 
 
 class BulkDeleteRequest(BaseModel):

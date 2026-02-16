@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.db.session import get_db
+from app.api.auth import require_api_key
 from app.models.database import Equipment, EquipmentRelationship, Document, DetailedConnection, EquipmentLocation, Page
 from app.models.schemas import (
     EquipmentResponse, EquipmentDetail, RelationshipCreate, DetailedConnectionResponse,
@@ -11,7 +12,7 @@ from app.models.schemas import (
     PowerFlowResponse, PowerFlowNode
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_api_key)])
 
 
 @router.get("/autocomplete")

@@ -11,12 +11,13 @@ from app.models.schemas import (
     EquipmentProfileResponse, ContentCategory
 )
 from app.db.session import get_db, SessionLocal
+from app.api.auth import require_api_key
 from app.config import settings
 from app.services.supplementary_processor import supplementary_processor
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_api_key)])
 
 # Allowed file extensions
 ALLOWED_EXTENSIONS = {'.xlsx', '.xls', '.csv', '.docx'}

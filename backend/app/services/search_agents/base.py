@@ -184,7 +184,7 @@ If the information is incomplete, say what's missing."""
             elif self.anthropic_client:
                 response = self.anthropic_client.messages.create(
                     model="claude-sonnet-4-20250514",
-                    max_tokens=512,
+                    max_tokens=1024,
                     system=system_prompt,
                     messages=[{"role": "user", "content": user_prompt}]
                 )
@@ -211,9 +211,9 @@ If the information is incomplete, say what's missing."""
         Calculate confidence score based on search results.
 
         Factors:
-        - Number of results
-        - Average relevance scores
-        - Source type diversity
+        - Number of results (weight: 0.35)
+        - Average relevance scores (weight: 0.50)
+        - Source type diversity (weight: 0.15)
         """
         if not results:
             return 0.0
@@ -221,14 +221,16 @@ If the information is incomplete, say what's missing."""
         # Base confidence from number of results
         count_factor = min(len(results) / 5.0, 1.0)  # Max out at 5 results
 
-        # Average relevance score
-        avg_relevance = sum(r.relevance_score for r in results) / len(results)
+        # Average relevance score (with division-by-zero protection)
+        total_relevance = sum(r.relevance_score for r in results)
+        avg_relevance = total_relevance / len(results) if len(results) > 0 else 0.0
 
-        # Source diversity bonus
+        # Source diversity factor (0 to 1.0)
         source_types = set(r.source_type for r in results)
-        diversity_bonus = 0.1 * (len(source_types) - 1) if len(source_types) > 1 else 0
+        diversity_factor = min(len(source_types) / 3.0, 1.0)  # Max at 3 different source types
 
-        confidence = (count_factor * 0.4 + avg_relevance * 0.5 + diversity_bonus)
+        # Weights sum to 1.0
+        confidence = (count_factor * 0.35 + avg_relevance * 0.50 + diversity_factor * 0.15)
         return min(confidence, 1.0)
 
     def run(

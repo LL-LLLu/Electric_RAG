@@ -160,11 +160,7 @@ class IOControlAgent(SearchAgent):
         enhanced_query = f"{query} IO point signal PLC control input output"
         query_embedding = embedding_service.generate_embedding(enhanced_query)
 
-        project_filter = ""
-        if project_id:
-            project_filter = "AND sd.project_id = :project_id"
-
-        sql = text(f"""
+        sql = text("""
             SELECT
                 sc.id,
                 sc.document_id,
@@ -184,14 +180,12 @@ class IOControlAgent(SearchAgent):
                 OR sc.content ILIKE '%signal%'
                 OR sc.content ILIKE '%PLC%'
             )
-            {project_filter}
+            AND (:project_id IS NULL OR sd.project_id = :project_id)
             ORDER BY sc.embedding <=> CAST(:embedding AS vector)
             LIMIT 5
         """)
 
-        params = {"embedding": str(query_embedding)}
-        if project_id:
-            params["project_id"] = project_id
+        params = {"embedding": str(query_embedding), "project_id": project_id}
 
         result = db.execute(sql, params)
 
@@ -207,7 +201,7 @@ class IOControlAgent(SearchAgent):
                     pass
 
             results.append(AgentSearchResult(
-                content=row.content[:500] if len(row.content) > 500 else row.content,
+                content=(row.content[:500] if len(row.content) > 500 else row.content) if row.content else "",
                 source_type="supplementary",
                 document_name=row.original_filename,
                 page_or_location=row.source_location or "",

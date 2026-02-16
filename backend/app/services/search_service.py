@@ -4,7 +4,7 @@ import re
 import time
 import logging
 from datetime import datetime
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import text, or_, func
 
@@ -15,6 +15,7 @@ from app.models.database import Document, Page, Equipment, EquipmentLocation, Eq
 from app.models.schemas import QueryType, SearchResult, SearchResponse, DocumentResponse, EquipmentBrief
 from app.services.embedding_service import embedding_service
 from app.services.extraction_service import extraction_service
+from app.services.graph_service import graph_service
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,18 @@ Output: chiller CH IO points signals AI AO DI DO analog digital input output"""
 
 class SearchService:
     """Hybrid search: exact match + semantic + keyword with query rewriting"""
+
+    @staticmethod
+    def _tag_boundary_pattern(tag: str) -> str:
+        """Create a PostgreSQL regex pattern that matches a tag with word boundaries.
+
+        Prevents 'P-1' from matching 'P-10' or 'P-101' by ensuring the tag
+        is not followed by additional alphanumeric characters.
+        Uses PostgreSQL ~* (case-insensitive regex) operator.
+        """
+        escaped = re.escape(tag)
+        # Match tag preceded by start/non-alnum and followed by end/non-alnum
+        return f"(^|[^A-Za-z0-9]){escaped}($|[^A-Za-z0-9])"
 
     def __init__(self):
         """Initialize search service with LLM client for query rewriting"""
@@ -441,6 +454,7 @@ class SearchService:
             "keyword": 0.8,         # Basic keyword match
             "supplementary_semantic": 1.1,  # Supplementary docs are valuable
             "equipment_data": 1.4,  # Structured equipment data is high value
+            "graph_relationship": 1.35,  # Graph-derived relationships are highly relevant
         }
         multiplier = match_type_multipliers.get(match_type, 1.0)
         score *= multiplier
@@ -449,7 +463,7 @@ class SearchService:
         if result_equipment_tag and equipment_tags:
             tag_upper = result_equipment_tag.upper()
             if any(tag_upper == et.upper() for et in equipment_tags):
-                score *= 1.3  # 30% boost for direct equipment match
+                score *= 2.0  # Significant boost for direct equipment match (ensures plan pages are prioritized)
 
         # 3. Query type alignment boost
         if data_type:
@@ -464,6 +478,13 @@ class SearchService:
             aligned_types = query_type_data_alignment.get(query_type, [])
             if data_type in aligned_types:
                 score *= 1.2  # 20% boost for aligned data type
+
+        # 3b. Location Intent Boost - if query is about location, boost Plan/PID pages over Schedules
+        if query_type == QueryType.EQUIPMENT_LOOKUP and any(word in query.lower() for word in ["where", "locate", "room"]):
+            # If we could detect drawing type here, we would boost 'PID' or 'GENERAL' (usually plans)
+            # For now, we boost if the snippet contains room-like patterns
+            if re.search(r'\b\d-\d{3}\b', snippet or ""): # Matches room numbers like 1-117
+                score *= 1.4
 
         # 4. Query keyword boost - check if query keywords appear in snippet
         if snippet:
@@ -487,6 +508,160 @@ class SearchService:
 
         # Cap score at 2.0 to prevent runaway scores
         return min(score, 2.0)
+
+    def _build_document_response(self, document: Document) -> DocumentResponse:
+        """Convert a Document ORM object into API response model."""
+        return DocumentResponse(
+            id=document.id,
+            filename=document.filename,
+            original_filename=document.original_filename,
+            title=document.title,
+            drawing_number=document.drawing_number,
+            revision=document.revision,
+            system=document.system,
+            area=document.area,
+            file_size=document.file_size,
+            page_count=document.page_count,
+            upload_date=document.upload_date,
+            processed=document.processed
+        )
+
+    def _get_document_response_cached(self, db: Session, doc_id: int, cache: dict) -> Tuple[Optional[DocumentResponse], Optional[int]]:
+        """Fetch DocumentResponse + project_id with simple cache to avoid duplicate lookups."""
+        if doc_id in cache:
+            return cache[doc_id]
+
+        document = db.query(Document).filter(Document.id == doc_id).first()
+        if not document:
+            cache[doc_id] = (None, None)
+            return cache[doc_id]
+
+        response = self._build_document_response(document)
+        cache[doc_id] = (response, document.project_id)
+        return cache[doc_id]
+
+    def _format_graph_snippet(self, base_tag: str, related_tag: str, relation_key: str, details: dict) -> str:
+        """Create a human-readable snippet for graph-derived connections."""
+        relation_templates = {
+            "feeds_from": "{related} feeds {base}",
+            "feeds_to": "{base} feeds {related}",
+            "controlled_by": "{related} controls {base}",
+            "controls": "{base} controls {related}",
+            "protected_by": "{related} protects {base}",
+            "protects": "{base} protects {related}",
+            "monitored_by": "{related} monitors {base}",
+            "monitors": "{base} monitors {related}",
+            "connected_to": "{base} connects to {related}",
+            "driven_by": "{related} drives {base}",
+            "drives": "{base} drives {related}",
+        }
+        template = relation_templates.get(relation_key, "{base} related to {related}")
+        snippet = template.format(base=base_tag, related=related_tag)
+
+        detail_parts = []
+        detail_fields = [
+            ("connection_type", "Type"),
+            ("voltage", "Voltage"),
+            ("breaker", "Breaker"),
+            ("wire_size", "Wire"),
+            ("signal_type", "Signal"),
+            ("io_type", "IO"),
+            ("point_name", "Point"),
+            ("function", "Function"),
+            ("medium", "Medium"),
+            ("pipe_size", "Size"),
+        ]
+
+        for field, label in detail_fields:
+            value = details.get(field)
+            if value:
+                detail_parts.append(f"{label}: {value}")
+
+        wire_numbers = details.get("wire_numbers")
+        if wire_numbers:
+            if isinstance(wire_numbers, list):
+                wire_value = ", ".join(wire_numbers)
+            else:
+                wire_value = wire_numbers
+            detail_parts.append(f"Wires: {wire_value}")
+
+        if detail_parts:
+            snippet += " | " + "; ".join(detail_parts)
+
+        return snippet
+
+    def _graph_relationship_results(
+        self,
+        db: Session,
+        equipment_tags: List[str],
+        query_type: QueryType,
+        project_id: Optional[int],
+        max_results: int = 8
+    ) -> List[SearchResult]:
+        """Leverage stored equipment graph to surface upstream/downstream relationships."""
+        if not equipment_tags:
+            return []
+
+        if query_type == QueryType.RELATIONSHIP:
+            relation_keys = [
+                "feeds_from", "feeds_to", "controlled_by", "controls",
+                "protected_by", "protects", "monitored_by", "monitors"
+            ]
+        elif query_type == QueryType.UPSTREAM_DOWNSTREAM:
+            relation_keys = ["feeds_from", "feeds_to"]
+        elif query_type == QueryType.WIRE_TRACE:
+            relation_keys = ["controls", "controlled_by", "monitors", "monitored_by"]
+        else:
+            relation_keys = []
+
+        if not relation_keys:
+            return []
+
+        results: List[SearchResult] = []
+        document_cache: dict[int, Tuple[Optional[DocumentResponse], Optional[int]]] = {}
+
+        for tag in equipment_tags[:3]:
+            try:
+                connections = graph_service.get_equipment_connections(db, tag)
+            except Exception as exc:
+                logger.warning(f"[SEARCH] Graph lookup failed for {tag}: {exc}")
+                continue
+
+            for key in relation_keys:
+                related_items = connections.get(key, [])
+                for item in related_items:
+                    related_tag = item.get("tag")
+                    details = item.get("details") or {}
+                    doc_id = details.get("document_id")
+                    page_number = details.get("page_number") or 1
+
+                    if not related_tag or not doc_id:
+                        continue
+
+                    document, doc_project_id = self._get_document_response_cached(db, doc_id, document_cache)
+                    if not document:
+                        continue
+
+                    if project_id and doc_project_id and doc_project_id != project_id:
+                        continue
+
+                    snippet = self._format_graph_snippet(tag, related_tag, key, details)
+                    source_location = f"graph:{tag}:{key}:{related_tag}"
+
+                    results.append(SearchResult(
+                        equipment=None,
+                        document=document,
+                        page_number=page_number,
+                        relevance_score=1.35,
+                        snippet=snippet,
+                        match_type="graph_relationship",
+                        source_location=source_location
+                    ))
+
+                    if len(results) >= max_results:
+                        return results
+
+        return results
 
     def search(self, db: Session, query: str, limit: int = 30, project_id: int = None, max_per_document: int = 5, rewrite_query: bool = True) -> SearchResponse:
         """Perform comprehensive hybrid search across ALL document types.
@@ -567,7 +742,7 @@ class SearchService:
         else:
             equipment_tags = []
 
-        print(f"\n[SEARCH] === Starting search ===")
+        logger.info(f"[SEARCH] === Starting search ===")
         logger.debug(f"[SEARCH] Original query: {original_query[:60]}...")
         if search_query != original_query:
             logger.debug(f"[SEARCH] Rewritten query: {search_query[:80]}...")
@@ -579,6 +754,10 @@ class SearchService:
         logger.debug(f"[SEARCH] Project ID: {project_id}")
 
         # === SEARCH ALL SOURCES (using rewritten query for semantic/keyword) ===
+        if query_type in [QueryType.RELATIONSHIP, QueryType.UPSTREAM_DOWNSTREAM, QueryType.WIRE_TRACE]:
+            graph_results = self._graph_relationship_results(db, equipment_tags, query_type, project_id)
+            for graph_result in graph_results:
+                add_result(graph_result, skip_doc_limit=True)
 
         # 0. Equipment type search (for "list all X" queries)
         if detected_equipment_type:
@@ -608,19 +787,19 @@ class SearchService:
 
         # 2. Text search for equipment tags in PDF
         if equipment_tags:
-            text_results = self._text_search_for_equipment(db, equipment_tags, 20, project_id)
+            text_results = self._text_search_for_equipment(db, equipment_tags, 30, project_id)
             logger.debug(f"[SEARCH] 2. Text search (PDF): {len(text_results)} results")
             for r in text_results:
                 add_result(r)
 
         # 3. Semantic search in PDF (use rewritten query for better embeddings)
-        semantic_results = self._semantic_search(db, search_query, 20, project_id)
+        semantic_results = self._semantic_search(db, search_query, 30, project_id)
         logger.debug(f"[SEARCH] 3. Semantic search (PDF): {len(semantic_results)} results")
         for r in semantic_results:
             add_result(r)
 
-        # 4. Keyword search in PDF (use rewritten query for expanded terms)
-        keyword_results = self._keyword_search(db, search_query, 20, project_id)
+        # 4. Keyword search in PDF (use ORIGINAL query to avoid noise from LLM expansion)
+        keyword_results = self._keyword_search(db, original_query, 30, project_id)
         logger.debug(f"[SEARCH] 4. Keyword search (PDF): {len(keyword_results)} results")
         for r in keyword_results:
             add_result(r)
@@ -666,6 +845,20 @@ class SearchService:
         # Sort all results by enhanced relevance score
         all_results.sort(key=lambda r: r.relevance_score, reverse=True)
 
+        # === CROSS-ENCODER RERANKING ===
+        # Rerank top candidates for better precision/recall
+        if len(all_results) > 10:
+            try:
+                from app.services.reranker_service import reranker_service
+                rerank_count = min(len(all_results), 60)
+                candidates = all_results[:rerank_count]
+                remainder = all_results[rerank_count:]
+                reranked = reranker_service.rerank(original_query, candidates, top_k=limit)
+                all_results = reranked + remainder
+                logger.debug(f"[SEARCH] Reranked top {rerank_count} results")
+            except Exception as e:
+                logger.warning(f"[SEARCH] Reranking skipped: {e}")
+
         # Count result types for logging
         pdf_count = sum(1 for r in all_results if r.match_type in ["exact", "text_search", "semantic", "keyword"])
         supp_count = sum(1 for r in all_results if r.match_type in ["supplementary_semantic", "equipment_data"])
@@ -683,16 +876,21 @@ class SearchService:
         )
 
     def _text_search_for_equipment(self, db: Session, tags: List[str], limit: int, project_id: int = None) -> List[SearchResult]:
-        """Search for equipment mentions in OCR text and AI analysis"""
+        """Search for equipment mentions in OCR text and AI analysis.
+
+        Uses PostgreSQL regex with word boundaries to prevent 'P-1' matching 'P-10'.
+        """
         results = []
 
         for tag in tags:
-            # Search in OCR text, AI analysis, and AI equipment list
+            # Use regex word-boundary matching to avoid false positives
+            # e.g., "P-1" should NOT match "P-10" or "P-101"
+            boundary_pattern = self._tag_boundary_pattern(tag)
             query = db.query(Page).join(Document).filter(
                 or_(
-                    Page.ocr_text.ilike(f"%{tag}%"),
-                    Page.ai_analysis.ilike(f"%{tag}%"),
-                    Page.ai_equipment_list.ilike(f"%{tag}%")
+                    Page.ocr_text.op("~*")(boundary_pattern),
+                    Page.ai_analysis.op("~*")(boundary_pattern),
+                    Page.ai_equipment_list.op("~*")(boundary_pattern)
                 )
             )
             if project_id is not None:
@@ -725,7 +923,7 @@ class SearchService:
                     equipment=EquipmentBrief(id=0, tag=tag, equipment_type="UNKNOWN"),
                     document=doc_response,
                     page_number=page.page_number,
-                    relevance_score=0.9,
+                    relevance_score=1.5,
                     snippet=snippet or f"Equipment {tag} mentioned on this page",
                     match_type="text_search"
                 ))
@@ -866,7 +1064,7 @@ class SearchService:
             snippet_source = row.ocr_text
             if hasattr(row, 'ai_analysis') and row.ai_analysis:
                 snippet_source = f"{row.ai_analysis}\n\n{row.ocr_text}"
-            snippet = snippet_source[:200] + "..." if snippet_source and len(snippet_source) > 200 else snippet_source
+            snippet = snippet_source[:1500] + "..." if snippet_source and len(snippet_source) > 1500 else snippet_source
 
             results.append(SearchResult(
                 equipment=None,
@@ -880,18 +1078,31 @@ class SearchService:
         return results
 
     def _keyword_search(self, db: Session, query: str, limit: int, project_id: int = None) -> List[SearchResult]:
-        """Full-text keyword search including AI analysis"""
-        search_term = f"%{query}%"
+        """Full-text keyword search including AI analysis.
 
-        kw_query = db.query(Page).join(Document).filter(
-            or_(
-                Page.ocr_text.ilike(search_term),
-                Page.ai_analysis.ilike(search_term),
-                Page.ai_equipment_list.ilike(search_term),
-                Document.title.ilike(search_term),
-                Document.drawing_number.ilike(search_term)
-            )
-        )
+        Splits the query into individual keywords and searches for each,
+        rather than using the entire (potentially expanded) query as one ILIKE pattern.
+        """
+        # Split query into meaningful keywords (skip short/common words)
+        stop_words = {"what", "where", "is", "the", "a", "an", "and", "or", "for", "to",
+                      "of", "in", "on", "how", "does", "do", "are", "this", "that", "with",
+                      "from", "by", "all", "about", "which", "who", "it", "at", "be", "has"}
+        keywords = [w for w in query.split() if len(w) >= 2 and w.lower() not in stop_words]
+
+        if not keywords:
+            keywords = [query]  # Fallback to full query
+
+        # Build OR conditions for each keyword across all text fields
+        keyword_conditions = []
+        for kw in keywords[:8]:  # Limit to 8 keywords to avoid huge queries
+            term = f"%{kw}%"
+            keyword_conditions.append(Page.ocr_text.ilike(term))
+            keyword_conditions.append(Page.ai_analysis.ilike(term))
+            keyword_conditions.append(Page.ai_equipment_list.ilike(term))
+            keyword_conditions.append(Document.title.ilike(term))
+            keyword_conditions.append(Document.drawing_number.ilike(term))
+
+        kw_query = db.query(Page).join(Document).filter(or_(*keyword_conditions))
         if project_id is not None:
             kw_query = kw_query.filter(Document.project_id == project_id)
         pages = kw_query.limit(limit).all()
@@ -914,7 +1125,7 @@ class SearchService:
                 processed=doc.processed
             )
 
-            snippet = page.ocr_text[:200] + "..." if page.ocr_text and len(page.ocr_text) > 200 else page.ocr_text
+            snippet = page.ocr_text[:1500] + "..." if page.ocr_text and len(page.ocr_text) > 1500 else page.ocr_text
 
             results.append(SearchResult(
                 equipment=None,
@@ -1080,12 +1291,16 @@ class SearchService:
 
     def _search_equipment_data(self, db: Session, tags: List[str], data_types: List[str] = None,
                                limit: int = 10, project_id: int = None) -> List[SearchResult]:
-        """Search structured equipment data by tags and optional data types"""
+        """Search structured equipment data by tags and optional data types.
+
+        Uses regex word-boundary matching to prevent false positives.
+        """
         results = []
 
         for tag in tags:
+            boundary_pattern = self._tag_boundary_pattern(tag)
             query = db.query(EquipmentData).join(SupplementaryDocument).filter(
-                EquipmentData.equipment_tag.ilike(f"%{tag}%")
+                EquipmentData.equipment_tag.op("~*")(boundary_pattern)
             )
             if project_id is not None:
                 query = query.filter(SupplementaryDocument.project_id == project_id)

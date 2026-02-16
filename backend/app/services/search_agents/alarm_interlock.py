@@ -225,11 +225,7 @@ class AlarmInterlockAgent(SearchAgent):
         enhanced_query = f"{query} alarm interlock trip safety shutdown permissive"
         query_embedding = embedding_service.generate_embedding(enhanced_query)
 
-        project_filter = ""
-        if project_id:
-            project_filter = "AND sd.project_id = :project_id"
-
-        sql = text(f"""
+        sql = text("""
             SELECT
                 sc.id,
                 sc.document_id,
@@ -249,14 +245,12 @@ class AlarmInterlockAgent(SearchAgent):
                 OR sc.content ILIKE '%shutdown%'
                 OR sc.content ILIKE '%permissive%'
             )
-            {project_filter}
+            AND (:project_id IS NULL OR sd.project_id = :project_id)
             ORDER BY sc.embedding <=> CAST(:embedding AS vector)
             LIMIT 5
         """)
 
-        params = {"embedding": str(query_embedding)}
-        if project_id:
-            params["project_id"] = project_id
+        params = {"embedding": str(query_embedding), "project_id": project_id}
 
         result = db.execute(sql, params)
 
@@ -271,7 +265,7 @@ class AlarmInterlockAgent(SearchAgent):
                     pass
 
             results.append(AgentSearchResult(
-                content=row.content[:500] if len(row.content) > 500 else row.content,
+                content=(row.content[:500] if len(row.content) > 500 else row.content) if row.content else "",
                 source_type="supplementary",
                 document_name=row.original_filename,
                 page_or_location=row.source_location or "",

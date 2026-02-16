@@ -4,18 +4,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Environment to deploy to'
-        required: true
-        default: 'production'
-        type: choice
-        options:
-          - production
-          - staging
-
-env:
-  RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
 jobs:
   # Run CI first
@@ -23,43 +11,31 @@ jobs:
     uses: ./.github/workflows/ci.yml
     secrets: inherit
 
-  # Deploy to Railway
-  deploy-railway:
-    name: Deploy to Railway
+  # Render auto-deploys from GitHub when CI passes
+  # This job serves as a gate + notification
+  deploy-render:
+    name: Deploy to Render
     runs-on: ubuntu-latest
     needs: ci
     if: github.ref == 'refs/heads/main'
     environment: production
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Railway CLI
-        run: npm install -g @railway/cli
-
-      - name: Deploy Backend
-        if: env.RAILWAY_TOKEN != ''
+      - name: Trigger Render Deploy Hook
+        if: secrets.RENDER_DEPLOY_HOOK_BACKEND != ''
         run: |
-          cd backend
-          railway up --service backend --detach
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          echo "Triggering Render backend deploy..."
+          curl -s "${{ secrets.RENDER_DEPLOY_HOOK_BACKEND }}" || true
+          echo "Triggering Render frontend deploy..."
+          curl -s "${{ secrets.RENDER_DEPLOY_HOOK_FRONTEND }}" || true
 
-      - name: Deploy Frontend
-        if: env.RAILWAY_TOKEN != ''
+      - name: Deploy Status
         run: |
-          cd frontend-vue
-          railway up --service frontend --detach
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          echo "CI passed on main branch."
+          echo "Render auto-deploy will pick up the changes."
+          echo "If deploy hooks are configured, manual deploys were also triggered."
 
-      - name: Skip Railway (no token)
-        if: env.RAILWAY_TOKEN == ''
-        run: |
-          echo "RAILWAY_TOKEN not set. Skipping Railway deployment."
-          echo "Railway auto-deploys from GitHub integration - this is expected."
-
-  # Alternative: Deploy to Docker Hub (for self-hosted deployments)
+  # Optional: Push to Docker Hub for self-hosted deployments
   push-images:
     name: Push Docker Images
     runs-on: ubuntu-latest
@@ -77,17 +53,6 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/electric-rag-backend
-            ${{ secrets.DOCKERHUB_USERNAME }}/electric-rag-frontend
-          tags: |
-            type=sha,prefix=
-            type=raw,value=latest
 
       - name: Build and push backend
         uses: docker/build-push-action@v5
@@ -108,19 +73,3 @@ jobs:
             VITE_API_URL=${{ vars.PRODUCTION_API_URL }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-  # Notify on completion
-  notify:
-    name: Notify
-    runs-on: ubuntu-latest
-    needs: [deploy-railway]
-    if: always()
-
-    steps:
-      - name: Deployment Status
-        run: |
-          if [ "${{ needs.deploy-railway.result }}" == "success" ]; then
-            echo "✅ Deployment successful!"
-          else
-            echo "❌ Deployment failed or skipped"
-          fi

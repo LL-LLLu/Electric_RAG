@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from app.models.database import Base
 
@@ -28,5 +28,8 @@ def get_db():
 
 
 def init_db():
-    """Initialize database tables"""
+    """Initialize database tables, ensuring pgvector extension exists"""
+    with engine.connect() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        conn.commit()
     Base.metadata.create_all(bind=engine)

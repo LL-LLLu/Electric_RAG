@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 import anthropic
 import google.generativeai as genai
 
+from app.db.session import SessionLocal
 from app.services.extraction_service import extraction_service
 from app.services.search_service import search_service
 from app.services.search_agents import (
@@ -270,13 +271,22 @@ class MultiAgentSearchService:
         """
         results = {}
 
+        def _run_agent_with_own_session(agent_name: str, agent: SearchAgent):
+            """Run an agent with its own database session for thread safety."""
+            thread_db = SessionLocal()
+            try:
+                return agent.run(thread_db, query, equipment_tags, project_id)
+            finally:
+                thread_db.close()
+
         # Use ThreadPoolExecutor for parallel execution
+        # Each agent gets its own DB session to avoid thread-safety issues
         with ThreadPoolExecutor(max_workers=min(5, len(selected_agents))) as executor:
             futures = {}
             for agent_name in selected_agents:
                 agent = self.agents[agent_name]
                 future = executor.submit(
-                    agent.run, db, query, equipment_tags, project_id
+                    _run_agent_with_own_session, agent_name, agent
                 )
                 futures[future] = agent_name
 
@@ -436,7 +446,9 @@ Provide a comprehensive, well-organized answer with all relevant technical detai
         for agent_name, finding in agent_results.items():
             for src in finding.sources:
                 # Create unique key for deduplication
-                key = (src.document_name, src.page_or_location, src.equipment_tag or "")
+                # Include content hash to avoid dropping different content at same location
+                content_hash = hash(src.content[:100]) if src.content else 0
+                key = (src.document_name, src.page_or_location, src.equipment_tag or "", content_hash)
 
                 if key not in seen:
                     seen.add(key)
