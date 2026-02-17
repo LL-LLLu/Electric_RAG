@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AppSidebar from '@/components/common/AppSidebar.vue'
+import EquipmentQuickView from '@/components/equipment/EquipmentQuickView.vue'
 </script>
 
 <template>
@@ -13,5 +14,8 @@ import AppSidebar from '@/components/common/AppSidebar.vue'
         <slot />
       </div>
     </main>
+
+    <!-- Global equipment quick-view drawer -->
+    <EquipmentQuickView />
   </div>
 </template>
