@@ -16,6 +16,25 @@ const isUser = computed(() => props.message.role === 'user')
 const hasSources = computed(() => props.message.sources && props.message.sources.length > 0)
 const copied = ref(false)
 
+// Equipment tag regex - matches common electrical/mechanical equipment tag patterns
+const EQUIPMENT_TAG_REGEX = /\b((?:RTU|FAN|AHU|FCU|VAV|MAU|EF|SF|RF|MOT|MTR|VFD|VSD|PMP|BKR|CB|MCCB|RLY|PLC|DCS|TS|PS|FS|LS|PT|FT|LT|TT|CV|MOV|SOV|BV|GV|MCC|SWG|PNL|DP|LP|MDP|XFMR|TX|SW|HS|SS|DS|HMI|OIT|UPS|GEN|DG|EG|CAP)[-_]?[A-Z]?\d{1,4}[A-Z]?)\b/g
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+const renderedContent = computed(() => {
+  if (isUser.value) return ''
+  const escaped = escapeHtml(props.message.content)
+  return escaped.replace(EQUIPMENT_TAG_REGEX, (match) => {
+    return `<span class="equipment-tag-link" data-tag="${match}" role="button" tabindex="0">${match}</span>`
+  })
+})
+
 function handleSourceClick(documentId: number, pageNumber: number) {
   emit('viewSource', documentId, pageNumber)
 }
@@ -58,9 +77,10 @@ async function copyToClipboard() {
             : 'bg-white border border-gray-200 text-gray-900'
         "
       >
-        <p class="text-sm whitespace-pre-wrap break-words" :class="isUser ? '' : 'text-left'">
+        <p v-if="isUser" class="text-sm whitespace-pre-wrap break-words">
           {{ message.content }}
         </p>
+        <p v-else class="text-sm whitespace-pre-wrap break-words text-left chat-markdown" v-html="renderedContent"></p>
 
         <!-- Copy button (only for assistant messages) -->
         <button
@@ -95,3 +115,18 @@ async function copyToClipboard() {
     </div>
   </div>
 </template>
+
+<style>
+.chat-markdown .equipment-tag-link {
+  color: #2563eb;
+  background: #dbeafe;
+  padding: 0.1rem 0.4rem;
+  border-radius: 9999px;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 0.85em;
+}
+.chat-markdown .equipment-tag-link:hover {
+  background: #bfdbfe;
+}
+</style>

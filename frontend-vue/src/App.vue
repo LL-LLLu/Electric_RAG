@@ -3,6 +3,7 @@ import { onMounted, onUnmounted } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import DefaultLayout from '@/layouts/DefaultLayout.vue'
 import { useThemeStore } from '@/stores/theme'
+import { useEquipmentQuickView } from '@/composables/useEquipmentQuickView'
 
 const themeStore = useThemeStore()
 const router = useRouter()
@@ -29,13 +30,27 @@ function handleGlobalKeydown(event: KeyboardEvent) {
   }
 }
 
+// Global click handler for equipment tag links rendered via v-html
+function handleEquipmentTagClick(event: Event) {
+  const target = event.target as HTMLElement
+  if (target.classList.contains('equipment-tag-link')) {
+    const tag = target.dataset.tag
+    if (tag) {
+      const quickView = useEquipmentQuickView()
+      quickView.open(tag)
+    }
+  }
+}
+
 onMounted(() => {
   themeStore.init()
   window.addEventListener('keydown', handleGlobalKeydown)
+  document.addEventListener('click', handleEquipmentTagClick)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
+  document.removeEventListener('click', handleEquipmentTagClick)
 })
 </script>
 

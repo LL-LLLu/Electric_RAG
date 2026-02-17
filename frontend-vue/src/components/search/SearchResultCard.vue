@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { DocumentTextIcon, CpuChipIcon, EyeIcon } from '@heroicons/vue/24/outline'
+import { DocumentTextIcon, EyeIcon } from '@heroicons/vue/24/outline'
 import type { SearchResult } from '@/types'
+import EquipmentTagLink from '@/components/equipment/EquipmentTagLink.vue'
 
 const props = defineProps<{
   result: SearchResult
@@ -44,13 +45,7 @@ function viewPage() {
       <div class="flex items-start justify-between mb-3">
         <div class="flex items-center gap-2 flex-wrap">
           <!-- Equipment Tag -->
-          <span
-            v-if="hasEquipment"
-            class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
-          >
-            <CpuChipIcon class="h-3 w-3 mr-1" />
-            {{ result.equipment!.tag }}
-          </span>
+          <EquipmentTagLink v-if="hasEquipment" :tag="result.equipment!.tag" />
 
           <!-- Equipment Type -->
           <span

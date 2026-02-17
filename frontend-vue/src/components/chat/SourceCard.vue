@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { DocumentTextIcon } from '@heroicons/vue/24/outline'
 import type { SourceReference } from '@/types'
+import EquipmentTagLink from '@/components/equipment/EquipmentTagLink.vue'
 
 const props = defineProps<{
   source: SourceReference
@@ -50,9 +51,7 @@ const shortName = computed(() => {
       </p>
       <p class="text-xs text-gray-500">
         Page {{ source.page_number }}
-        <span v-if="source.equipment_tag" class="text-blue-600 ml-1">
-          {{ source.equipment_tag }}
-        </span>
+        <EquipmentTagLink v-if="source.equipment_tag" :tag="source.equipment_tag" />
       </p>
     </div>
   </div>
