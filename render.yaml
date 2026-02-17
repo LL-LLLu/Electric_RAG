@@ -49,4 +49,6 @@ services:
     envVars:
       - key: PORT
         value: "10000"
+      - key: VITE_API_URL
+        value: "https://electric-rag-backend.onrender.com"
     autoDeploy: false  # Deployed via GitHub Actions after CI passes
