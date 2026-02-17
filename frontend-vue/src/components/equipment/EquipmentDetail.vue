@@ -8,6 +8,7 @@ import RelationshipGraph from './RelationshipGraph.vue'
 import InteractiveGraph from './InteractiveGraph.vue'
 import LocationsList from './LocationsList.vue'
 import PowerFlowTree from './PowerFlowTree.vue'
+import EquipmentSpecsPanel from './EquipmentSpecsPanel.vue'
 
 const props = defineProps<{
   equipment: EquipmentDetail
@@ -135,6 +136,9 @@ function getTypeColor(type: string): string {
           No additional information available for this equipment.
         </p>
       </div>
+
+      <!-- Specifications from Supplementary Docs -->
+      <EquipmentSpecsPanel :tag="equipment.tag" />
 
       <!-- Divider -->
       <hr class="border-gray-200 dark:border-gray-700" />
