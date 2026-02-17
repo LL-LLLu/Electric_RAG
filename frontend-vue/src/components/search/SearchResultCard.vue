@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { DocumentTextIcon, EyeIcon } from '@heroicons/vue/24/outline'
+import { DocumentTextIcon, EyeIcon, ChatBubbleLeftIcon } from '@heroicons/vue/24/outline'
 import type { SearchResult } from '@/types'
+import { useSearchStore } from '@/stores/search'
 import EquipmentTagLink from '@/components/equipment/EquipmentTagLink.vue'
+import AlsoOnThisPage from '@/components/equipment/AlsoOnThisPage.vue'
 
 const props = defineProps<{
   result: SearchResult
@@ -34,6 +36,15 @@ function viewPage() {
         pageNum: props.result.page_number
       }
     })
+  }
+}
+
+function askAbout() {
+  if (props.result.equipment) {
+    const searchStore = useSearchStore()
+    searchStore.setQuery(`What are the details and connections for ${props.result.equipment.tag}?`)
+    searchStore.setMode('ai')
+    router.push({ name: 'search' })
   }
 }
 </script>
@@ -83,14 +94,31 @@ function viewPage() {
       </div>
 
       <!-- Snippet -->
-      <div v-if="result.snippet" class="mb-4">
+      <div v-if="result.snippet" class="mb-3">
         <p class="text-sm text-gray-600 line-clamp-3 bg-gray-50 p-3 rounded border-l-2 border-blue-400">
           {{ result.snippet }}
         </p>
       </div>
 
+      <!-- Related equipment on same page -->
+      <AlsoOnThisPage
+        v-if="hasDocument && hasEquipment"
+        :document-id="result.document!.id"
+        :page-number="result.page_number"
+        :exclude-tag="result.equipment!.tag"
+      />
+
       <!-- Actions -->
-      <div class="flex justify-end">
+      <div class="flex justify-end gap-2 mt-3">
+        <button
+          v-if="hasEquipment"
+          type="button"
+          class="inline-flex items-center px-3 py-1.5 border border-blue-300 rounded-md text-sm font-medium text-blue-700 bg-white hover:bg-blue-50 transition-colors"
+          @click="askAbout"
+        >
+          <ChatBubbleLeftIcon class="h-4 w-4 mr-1.5" />
+          Ask
+        </button>
         <button
           v-if="hasDocument"
           type="button"
