@@ -1,4 +1,6 @@
 import os
+from typing import List
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -17,13 +19,21 @@ class Settings(BaseSettings):
     api_secret_key: str = os.environ.get("API_SECRET_KEY", "")
 
     # CORS - restrict in production, allow all in development
-    cors_origins: list = os.environ.get(
-        "CORS_ORIGINS", "http://localhost:5173,http://localhost:3000"
-    ).split(",")
+    cors_origins: List[str] = ["http://localhost:5173", "http://localhost:3000"]
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v):
+        """Accept both comma-separated strings and JSON arrays"""
+        if isinstance(v, str):
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
+        return v
+
+    model_config = {
+        "env_file": ".env",
+        "extra": "ignore",
+        "protected_namespaces": (),
+    }
 
 
 settings = Settings()
