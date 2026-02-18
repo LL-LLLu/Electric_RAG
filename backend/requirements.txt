@@ -9,9 +9,10 @@ psycopg2-binary==2.9.9
 pgvector==0.2.5
 alembic==1.13.1
 
-# OCR
+# OCR & PDF
 paddleocr==2.7.0.3
 paddlepaddle==2.6.2
+PyMuPDF>=1.23.0
 pdf2image==1.17.0
 Pillow==10.2.0
 
