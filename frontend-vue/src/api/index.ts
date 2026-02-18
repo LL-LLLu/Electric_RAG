@@ -5,9 +5,19 @@ import axios, {
   type AxiosResponse,
 } from "axios";
 
+// Determine API base URL, auto-upgrading to HTTPS when page is served over HTTPS
+let apiBaseURL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+if (
+  typeof window !== "undefined" &&
+  window.location.protocol === "https:" &&
+  apiBaseURL.startsWith("http://")
+) {
+  apiBaseURL = apiBaseURL.replace("http://", "https://");
+}
+
 // Create axios instance with default config
 const api: AxiosInstance = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:8000",
+  baseURL: apiBaseURL,
   timeout: 120000, // 2 minutes
   headers: {
     "Content-Type": "application/json",
