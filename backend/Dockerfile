@@ -19,10 +19,11 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# Install PyMuPDF from pre-built wheel (avoids 10+ min source compile)
-RUN pip install --no-cache-dir --prefer-binary PyMuPDF
+# Install PyMuPDF in its own layer (compiles from source ~7min first time, cached after)
+# PaddleOCR 2.7.0.3 requires PyMuPDF<1.21.0 which has no pre-built wheels
+RUN pip install --no-cache-dir "PyMuPDF<1.21.0"
 
-# Install heavy ML packages first (cached separately)
+# Install heavy ML packages (PyMuPDF already satisfied from above)
 RUN pip install --no-cache-dir \
     paddlepaddle==2.6.2 \
     paddleocr==2.7.0.3
