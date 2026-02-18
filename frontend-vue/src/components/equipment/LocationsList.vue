@@ -5,7 +5,7 @@ import { DocumentTextIcon, ChevronRightIcon, ChevronDownIcon } from '@heroicons/
 import type { EquipmentLocation } from '@/types'
 import DrawingTypeBadge from '@/components/common/DrawingTypeBadge.vue'
 
-const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+import { apiBaseURL } from '@/api/index'
 
 const props = defineProps<{
   locations: EquipmentLocation[]
@@ -144,7 +144,7 @@ function navigateToPage(docId: number, pageNum: number) {
           >
             <div class="flex items-center gap-2 min-w-0 flex-1">
               <img
-                :src="`${apiBaseUrl}/api/documents/${doc.document_id}/page/${page.page_number}/thumbnail?width=64`"
+                :src="`${apiBaseURL}/api/documents/${doc.document_id}/page/${page.page_number}/thumbnail?width=64`"
                 :alt="`Page ${page.page_number}`"
                 class="w-8 h-8 rounded border border-gray-200 dark:border-gray-600 object-cover flex-shrink-0"
                 loading="lazy"

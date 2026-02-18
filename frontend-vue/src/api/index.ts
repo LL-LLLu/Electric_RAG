@@ -95,5 +95,8 @@ api.interceptors.response.use(
 
 export default api;
 
+// Export the resolved base URL for use outside axios (image URLs, fetch calls, etc.)
+export { apiBaseURL };
+
 // Export types for use in other modules
 export type { AxiosError, AxiosResponse };

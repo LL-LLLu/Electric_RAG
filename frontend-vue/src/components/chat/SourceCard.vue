@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { DocumentTextIcon } from '@heroicons/vue/24/outline'
 import type { SourceReference } from '@/types'
+import { apiBaseURL } from '@/api/index'
 import EquipmentTagLink from '@/components/equipment/EquipmentTagLink.vue'
 
 const props = defineProps<{
@@ -13,8 +14,7 @@ defineEmits<{
 }>()
 
 const thumbnailUrl = computed(() => {
-  const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-  return `${baseUrl}/api/documents/${props.source.document_id}/page/${props.source.page_number}/thumbnail?width=100`
+  return `${apiBaseURL}/api/documents/${props.source.document_id}/page/${props.source.page_number}/thumbnail?width=100`
 })
 
 const shortName = computed(() => {

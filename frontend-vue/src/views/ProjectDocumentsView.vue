@@ -13,6 +13,7 @@ import {
 import { useProjectsStore } from '@/stores/projects'
 import * as documentsApi from '@/api/documents'
 import * as projectsApi from '@/api/projects'
+import { apiBaseURL } from '@/api/index'
 import { getSupplementaryDocuments } from '@/api/supplementary'
 import type { Document, Project } from '@/types'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
@@ -139,7 +140,7 @@ async function handleFileSelect(event: Event) {
       formData.append('file', file)
 
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/documents/project/${projectId.value}/upload`,
+        `${apiBaseURL}/api/documents/project/${projectId.value}/upload`,
         {
           method: 'POST',
           body: formData,
