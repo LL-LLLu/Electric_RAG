@@ -12,11 +12,18 @@ RUN npm ci
 COPY . .
 
 # Build argument for API URL (must be set at build time for Vite)
-ARG VITE_API_URL=http://localhost:8000
+# Render passes env vars as both build args and runtime vars
+ARG VITE_API_URL=https://electric-rag-backend.onrender.com
 ENV VITE_API_URL=$VITE_API_URL
+
+# Debug: print the API URL being baked into the bundle
+RUN echo "=== Building frontend with VITE_API_URL=$VITE_API_URL ==="
 
 # Build the application
 RUN npm run build
+
+# Verify the URL in the built output
+RUN grep -o 'http[s]*://[^"]*onrender\.com' dist/assets/index-*.js 2>/dev/null || echo "No onrender URL found in bundle (using localhost default)"
 
 # Production stage
 FROM nginx:alpine
