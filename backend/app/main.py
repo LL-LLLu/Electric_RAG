@@ -2,6 +2,7 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -48,6 +49,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Trust proxy headers (X-Forwarded-Proto, X-Forwarded-For) so FastAPI
+# generates https:// redirect URLs when behind Render's TLS termination
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
 
 
 # Security headers middleware
