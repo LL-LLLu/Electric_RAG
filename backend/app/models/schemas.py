@@ -451,6 +451,15 @@ class UploadResponse(BaseModel):
     pages_detected: int
 
 
+class ImportResponse(BaseModel):
+    document_id: int
+    original_filename: str
+    page_count: int
+    equipment_count: int
+    relationship_count: int
+    message: str
+
+
 class HealthResponse(BaseModel):
     status: str
     database: str

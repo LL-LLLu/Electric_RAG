@@ -2,6 +2,10 @@ import os
 import shutil
 import uuid
 import io
+import json
+import zipfile
+import tempfile
+import logging
 from typing import List, Optional
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, BackgroundTasks, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
@@ -10,12 +14,20 @@ from PIL import Image
 
 from app.db.session import get_db, SessionLocal
 from app.api.auth import require_api_key
-from app.models.database import Document, Page, Equipment, Project
-from app.models.schemas import DocumentResponse, DocumentDetail, UploadResponse, DocumentProjectAssign
+from app.models.database import (
+    Document, Page, Equipment, EquipmentLocation,
+    EquipmentRelationship, DetailedConnection, Project,
+)
+from app.models.schemas import (
+    DocumentResponse, DocumentDetail, UploadResponse,
+    DocumentProjectAssign, ImportResponse,
+)
 from app.services.document_processor import document_processor
 from app.services.ocr_service import ocr_service
 from app.config import settings
 from app.api.limiter import limiter
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(dependencies=[Depends(require_api_key)])
 
@@ -143,6 +155,317 @@ async def upload_document_to_project(
         message="Document uploaded successfully. Processing started.",
         pages_detected=0
     )
+
+
+def _to_str(val, max_len=None):
+    """Safely convert a value to string, serializing dicts/lists as JSON."""
+    if val is None:
+        return None
+    if isinstance(val, (dict, list)):
+        result = json.dumps(val)
+    else:
+        result = str(val)
+    if max_len and len(result) > max_len:
+        result = result[:max_len]
+    return result
+
+
+# 2 GB max uncompressed size for import bundles
+_MAX_BUNDLE_UNCOMPRESSED = 2 * 1024 * 1024 * 1024
+
+
+@router.post("/import", response_model=ImportResponse)
+@limiter.limit("5/minute")
+async def import_preprocessed_bundle(
+    request: Request,
+    file: UploadFile = File(...),
+    project_id: Optional[int] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """Import a pre-processed document bundle (zip) created by process_local.py.
+
+    Bypasses the RAM-intensive processing pipeline by importing
+    pre-computed OCR, AI analysis, embeddings, and equipment data.
+    """
+    if not file.filename or not file.filename.endswith(".zip"):
+        raise HTTPException(status_code=400, detail="File must be a .zip bundle")
+
+    # Validate project if specified
+    if project_id is not None:
+        project = db.query(Project).filter(Project.id == project_id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+    # Save uploaded zip to temp location
+    tmp_dir = tempfile.mkdtemp(prefix="import_bundle_")
+    zip_path = os.path.join(tmp_dir, "bundle.zip")
+    try:
+        with open(zip_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+
+        # Extract and validate zip
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                names = zf.namelist()
+                if "manifest.json" not in names:
+                    raise HTTPException(status_code=400, detail="Bundle missing manifest.json")
+
+                # Security: check uncompressed size to prevent zip bombs
+                total_size = sum(info.file_size for info in zf.infolist())
+                if total_size > _MAX_BUNDLE_UNCOMPRESSED:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Bundle too large when decompressed ({total_size / 1024 / 1024:.0f} MB)"
+                    )
+
+                # Security: validate all member paths to prevent path traversal
+                real_tmp = os.path.realpath(tmp_dir)
+                for member in zf.infolist():
+                    target = os.path.realpath(os.path.join(tmp_dir, member.filename))
+                    if not target.startswith(real_tmp + os.sep) and target != real_tmp:
+                        raise HTTPException(status_code=400, detail="Invalid path in zip bundle")
+
+                zf.extractall(tmp_dir)
+        except zipfile.BadZipFile:
+            raise HTTPException(status_code=400, detail="Invalid zip file")
+
+        # Read and validate manifest
+        with open(os.path.join(tmp_dir, "manifest.json"), "r") as f:
+            manifest = json.load(f)
+
+        if manifest.get("version") != "1.0":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported manifest version: {manifest.get('version')}"
+            )
+
+        doc_info = manifest.get("document", {})
+        pages_info = manifest.get("pages", [])
+        if not pages_info:
+            raise HTTPException(status_code=400, detail="Bundle contains no pages")
+
+        # Validate embedding dimensions on all pages
+        for i, pg in enumerate(pages_info):
+            emb = pg.get("embedding")
+            if not isinstance(emb, list) or len(emb) != 384:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Page {pg.get('page_number', i+1)}: expected 384-dim embedding, "
+                           f"got {type(emb).__name__} of length {len(emb) if isinstance(emb, list) else 'N/A'}"
+                )
+
+        # Find the original file in the bundle (sanitize with basename)
+        original_ext = os.path.splitext(doc_info.get("original_filename", ".pdf"))[1]
+        original_in_bundle = f"original{original_ext}"
+        if original_in_bundle not in names:
+            originals = [os.path.basename(n) for n in names if os.path.basename(n).startswith("original")]
+            if originals:
+                original_in_bundle = originals[0]
+                original_ext = os.path.splitext(original_in_bundle)[1]
+            else:
+                raise HTTPException(status_code=400, detail="Bundle missing original document file")
+
+        # --- Begin import transaction ---
+        try:
+            # Save original file with UUID name
+            file_id = str(uuid.uuid4())
+            filename = f"{file_id}{original_ext}"
+            dest_file_path = os.path.join(settings.upload_dir, filename)
+            os.makedirs(settings.upload_dir, exist_ok=True)
+            shutil.copy2(os.path.join(tmp_dir, original_in_bundle), dest_file_path)
+
+            # Create Document record (processed=2 means done)
+            document = Document(
+                filename=filename,
+                original_filename=doc_info.get("original_filename", "unknown"),
+                title=doc_info.get("title", ""),
+                file_path=dest_file_path,
+                file_size=doc_info.get("file_size", os.path.getsize(dest_file_path)),
+                page_count=doc_info.get("page_count", len(pages_info)),
+                pages_processed=len(pages_info),
+                processed=2,
+                project_id=project_id,
+            )
+            db.add(document)
+            db.flush()
+            document_id = document.id
+
+            # Create page image directory
+            page_img_dir = os.path.join(settings.upload_dir, f"doc_{document_id}", "pages")
+            os.makedirs(page_img_dir, exist_ok=True)
+
+            # Copy page images
+            for page_info in pages_info:
+                img_filename = page_info.get("image_filename", "")
+                src_img = os.path.join(tmp_dir, img_filename)
+                if os.path.exists(src_img):
+                    page_num = page_info["page_number"]
+                    dest_img = os.path.join(page_img_dir, f"page_{page_num}.png")
+                    shutil.copy2(src_img, dest_img)
+
+            # --- Pass 1: Create Pages, Equipment, EquipmentLocations ---
+            equipment_count = 0
+            created_equipment = {}  # tag -> Equipment object
+            all_relationships = []  # collect for two-pass insertion
+
+            for page_info in pages_info:
+                page_num = page_info["page_number"]
+                image_path = os.path.join(
+                    settings.upload_dir, f"doc_{document_id}", "pages", f"page_{page_num}.png"
+                )
+
+                page = Page(
+                    document_id=document_id,
+                    page_number=page_num,
+                    ocr_text=page_info.get("ocr_text", ""),
+                    processed_text=page_info.get("processed_text", ""),
+                    ai_analysis=page_info.get("ai_analysis", ""),
+                    ai_equipment_list=json.dumps(page_info.get("ai_equipment_list", [])),
+                    image_path=image_path,
+                    embedding=page_info.get("embedding"),
+                    drawing_type=page_info.get("drawing_type"),
+                )
+                db.add(page)
+                db.flush()
+
+                # Create Equipment and EquipmentLocation records
+                for eq_info in page_info.get("equipment", []):
+                    tag = eq_info.get("tag", "")
+                    if not tag:
+                        continue
+
+                    # Dedup by project_id + tag (same as document_processor.py:108-112)
+                    if tag in created_equipment:
+                        equipment = created_equipment[tag]
+                    else:
+                        equipment_query = db.query(Equipment).filter(Equipment.tag == tag)
+                        if project_id:
+                            equipment_query = equipment_query.filter(Equipment.project_id == project_id)
+                        equipment = equipment_query.first()
+
+                    if not equipment:
+                        equipment = Equipment(
+                            tag=tag,
+                            equipment_type=eq_info.get("equipment_type", "OTHER"),
+                            description=(eq_info.get("context", "") or "")[:500],
+                            document_id=document_id,
+                            primary_page=page_num,
+                            project_id=project_id,
+                        )
+                        db.add(equipment)
+                        db.flush()
+                        equipment_count += 1
+
+                    created_equipment[tag] = equipment
+
+                    # Create EquipmentLocation
+                    location = EquipmentLocation(
+                        equipment_id=equipment.id,
+                        page_id=page.id,
+                        context_text=(eq_info.get("context", "") or "")[:500],
+                    )
+                    bbox = eq_info.get("bbox")
+                    if bbox and isinstance(bbox, dict):
+                        location.x_min = bbox.get("x_min")
+                        location.y_min = bbox.get("y_min")
+                        location.x_max = bbox.get("x_max")
+                        location.y_max = bbox.get("y_max")
+                    db.add(location)
+
+                # Collect relationships for pass 2 (equipment may not exist yet)
+                for rel_info in page_info.get("relationships", []):
+                    all_relationships.append({
+                        "source": rel_info.get("source", ""),
+                        "target": rel_info.get("target", ""),
+                        "type": rel_info.get("type", "CONNECTS_TO"),
+                        "confidence": rel_info.get("confidence", 0.7),
+                        "page_number": page_num,
+                    })
+
+                # Create DetailedConnection records
+                for conn in page_info.get("detailed_connections", []):
+                    details = conn.get("details", {})
+                    wire_info = details.get("wire_info", {})
+
+                    db.add(DetailedConnection(
+                        document_id=document_id,
+                        page_number=page_num,
+                        source_tag=_to_str(conn.get("source", ""), 100),
+                        target_tag=_to_str(conn.get("target", ""), 100),
+                        category=_to_str(conn.get("category", "UNKNOWN"), 50),
+                        connection_type=_to_str(conn.get("connection_type", ""), 50),
+                        voltage=_to_str(details.get("voltage"), 50),
+                        breaker=_to_str(details.get("breaker"), 100),
+                        wire_size=_to_str(wire_info.get("size") if isinstance(wire_info, dict) else None, 50),
+                        wire_numbers=json.dumps(wire_info.get("wire_numbers", [])) if isinstance(wire_info, dict) else None,
+                        load=_to_str(details.get("load"), 100),
+                        signal_type=_to_str(details.get("signal_type"), 50),
+                        io_type=_to_str(conn.get("connection_type") if conn.get("category") == "CONTROL" else None, 20),
+                        point_name=_to_str(details.get("point_name"), 100),
+                        function=_to_str(details.get("function")),
+                        medium=_to_str(details.get("medium"), 100),
+                        pipe_size=_to_str(details.get("size"), 50),
+                        pipe_spec=_to_str(details.get("spec"), 100),
+                        inline_devices=json.dumps(details.get("inline_devices", [])) if details.get("inline_devices") else None,
+                        details_json=json.dumps(details),
+                        confidence=0.7,
+                    ))
+
+            # --- Pass 2: Create EquipmentRelationships (all equipment now exists) ---
+            relationship_count = 0
+            for rel in all_relationships:
+                source = created_equipment.get(rel["source"])
+                target = created_equipment.get(rel["target"])
+                if not source:
+                    source = db.query(Equipment).filter(Equipment.tag == rel["source"]).first()
+                if not target:
+                    target = db.query(Equipment).filter(Equipment.tag == rel["target"]).first()
+
+                if source and target:
+                    existing = db.query(EquipmentRelationship).filter(
+                        EquipmentRelationship.source_id == source.id,
+                        EquipmentRelationship.target_id == target.id,
+                        EquipmentRelationship.relationship_type == rel["type"],
+                    ).first()
+
+                    if not existing:
+                        db.add(EquipmentRelationship(
+                            source_id=source.id,
+                            target_id=target.id,
+                            relationship_type=rel["type"],
+                            document_id=document_id,
+                            page_number=rel["page_number"],
+                            confidence=rel["confidence"],
+                        ))
+                        relationship_count += 1
+
+            db.commit()
+
+            return ImportResponse(
+                document_id=document_id,
+                original_filename=doc_info.get("original_filename", "unknown"),
+                page_count=len(pages_info),
+                equipment_count=equipment_count,
+                relationship_count=relationship_count,
+                message="Bundle imported successfully. Document is ready for search.",
+            )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            db.rollback()
+            # Clean up files on failure
+            if 'dest_file_path' in locals() and os.path.exists(dest_file_path):
+                os.remove(dest_file_path)
+            if 'document_id' in locals():
+                doc_dir = os.path.join(settings.upload_dir, f"doc_{document_id}")
+                if os.path.exists(doc_dir):
+                    shutil.rmtree(doc_dir)
+            logger.error(f"Import failed: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail="Import failed. Check server logs for details.")
+
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 @router.get("/project/{project_id}", response_model=List[DocumentResponse])
